@@ -33,16 +33,19 @@ This project uses CMake. To compile it, do:
 
 ```sh
 $ cd build
-$ cmake ..
+$ cmake -D CMAKE_INSTALL_PREFIX=/usr/local ..
 $ make
 ```
 
-Among the various build files are `libudaemon.a` and `test_complete`.
+Once complete, among the various build files are `libudaemon.a` and 
+`test_complete`. The latter can be used to test the working of libudaemon.
 
 
 ## Installation
 
-After compilation a simple `make install` will install everything.
+After compilation a simple `make install` will install everything to the path
+provided by the `CMAKE_INSTALL_PREFIX` definition. If omitted, the files are
+installed under `/usr/local`.
 
 
 ## License

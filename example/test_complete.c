@@ -22,7 +22,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
-#include "udaemon.h"
+#include "udaemon/udaemon.h"
 
 #define PROGNAME "test"
 #define VERSION "1.0"

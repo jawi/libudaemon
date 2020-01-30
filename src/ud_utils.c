@@ -17,8 +17,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include "ud_utils.h"
-#include "ud_logging.h"
+#include "udaemon/ud_utils.h"
+#include "udaemon/ud_logging.h"
 
 /**
  * Drops the privileges of the running process to the user identified by the given UID/GID.

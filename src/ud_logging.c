@@ -10,7 +10,7 @@
 #include <syslog.h>
 #include <time.h>
 
-#include "ud_logging.h"
+#include "udaemon/ud_logging.h"
 
 static bool show_debug_log = false;
 

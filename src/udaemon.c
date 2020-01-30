@@ -18,9 +18,9 @@
 
 #include <sys/types.h>
 
-#include "ud_logging.h"
-#include "ud_utils.h"
-#include "udaemon.h"
+#include "udaemon/ud_logging.h"
+#include "udaemon/ud_utils.h"
+#include "udaemon/udaemon.h"
 
 // Let's see how often this is not sufficient...
 #define FD_MAX 5

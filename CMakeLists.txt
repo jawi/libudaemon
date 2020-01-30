@@ -14,10 +14,9 @@ add_library(udaemon
 
 target_include_directories(udaemon
     PUBLIC
-        $<INSTALL_INTERFACE:include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        include
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
+        src
 )
 
 target_compile_options(udaemon 
@@ -26,6 +25,32 @@ target_compile_options(udaemon
 
 target_compile_features(udaemon
     PRIVATE c_std_11
+)
+
+# Installation 
+
+include(GNUInstallDirs)
+install(TARGETS udaemon 
+    EXPORT udaemon-targets
+    LIBRARY  DESTINATION lib
+    ARCHIVE  DESTINATION lib
+)
+install(DIRECTORY include/ DESTINATION include)
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    udaemonConfigVersion.cmake
+    VERSION ${PACKAGE_VERSION}
+    COMPATIBILITY AnyNewerVersion
+)
+
+configure_file(
+    cmake/udaemonConfig.cmake.in cmake/udaemonConfig.cmake @ONLY
+)
+
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/udaemonConfig.cmake"
+              "${CMAKE_CURRENT_BINARY_DIR}/udaemonConfigVersion.cmake"
+        DESTINATION lib/cmake/udaemon
 )
 
 # Examples
