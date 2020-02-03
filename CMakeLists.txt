@@ -14,13 +14,14 @@ add_library(udaemon
 
 target_include_directories(udaemon
     PUBLIC
-        include
+        $<INSTALL_INTERFACE:include>    
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE
         src
 )
 
 target_compile_options(udaemon 
-    PRIVATE -Wall -Wstrict-prototypes -Wshadow -Wconversion -Og
+    PRIVATE -Wall -Wstrict-prototypes -Wshadow -Wconversion
 )
 
 target_compile_features(udaemon
@@ -37,6 +38,12 @@ install(TARGETS udaemon
 )
 install(DIRECTORY include/ DESTINATION include)
 
+install(EXPORT udaemon-targets
+  FILE udaemonTargets.cmake
+  NAMESPACE udaemon::
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/udaemon
+)
+
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file(
     udaemonConfigVersion.cmake
@@ -45,7 +52,7 @@ write_basic_package_version_file(
 )
 
 configure_file(
-    cmake/udaemonConfig.cmake.in cmake/udaemonConfig.cmake @ONLY
+    cmake/udaemonConfig.cmake.in udaemonConfig.cmake @ONLY
 )
 
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/udaemonConfig.cmake"
