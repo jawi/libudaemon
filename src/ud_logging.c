@@ -43,11 +43,11 @@ void destroy_logging(void) {
     closelog();
 }
 
-#define DO_LOG(LEVEL, MSG) \
+#define DO_LOG(LEVEL) \
     do { \
         va_list ap; \
         va_start(ap, msg); \
-        vsyslog(LEVEL, MSG, ap); \
+        vsyslog(LEVEL, msg, ap); \
         va_end(ap); \
     } while (0)
 
@@ -57,10 +57,12 @@ void destroy_logging(void) {
  * @param msg the log message;
  * @param args the arguments to include in the log message.
  */
+__attribute__((__format__ (__printf__, 1, 0)))
 void log_debug(const char *msg, ...) {
-    if (show_debug_log) {
-        DO_LOG(LOG_DEBUG, msg);
+    if (!show_debug_log) {
+        return;
     }
+    DO_LOG(LOG_DEBUG);
 }
 
 /**
@@ -69,8 +71,9 @@ void log_debug(const char *msg, ...) {
  * @param msg the log message;
  * @param args the arguments to include in the log message.
  */
+__attribute__((__format__ (__printf__, 1, 0)))
 void log_info(const char *msg, ...) {
-    DO_LOG(LOG_INFO, msg);
+    DO_LOG(LOG_INFO);
 }
 
 /**
@@ -79,8 +82,9 @@ void log_info(const char *msg, ...) {
  * @param msg the log message;
  * @param args the arguments to include in the log message.
  */
+__attribute__((__format__ (__printf__, 1, 0)))
 void log_warning(const char *msg, ...) {
-    DO_LOG(LOG_WARNING, msg);
+    DO_LOG(LOG_WARNING);
 }
 
 /**
@@ -89,6 +93,7 @@ void log_warning(const char *msg, ...) {
  * @param msg the log message;
  * @param args the arguments to include in the log message.
  */
+__attribute__((__format__ (__printf__, 1, 0)))
 void log_error(const char *msg, ...) {
-    DO_LOG(LOG_ERR, msg);
+    DO_LOG(LOG_ERR);
 }

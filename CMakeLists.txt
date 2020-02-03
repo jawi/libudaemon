@@ -2,8 +2,13 @@ cmake_minimum_required(VERSION 3.5)
 
 project(
     libudaemon
-    VERSION 0.5
+    VERSION 0.6
     LANGUAGES C
+)
+
+# generate an include file with the current version information
+configure_file(
+    cmake/ud_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/udaemon/ud_version.h @ONLY
 )
 
 add_library(udaemon
@@ -21,7 +26,7 @@ target_include_directories(udaemon
 )
 
 target_compile_options(udaemon 
-    PRIVATE -Wall -Wstrict-prototypes -Wshadow -Wconversion
+    PRIVATE -Wall -Wextra -Wstrict-prototypes -Wshadow -Wconversion
 )
 
 target_compile_features(udaemon

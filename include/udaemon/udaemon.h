@@ -63,9 +63,10 @@ typedef struct ud_config {
  * Callback event handler for polled event handling.
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
- * @param pollfd the polling information, such as file descriptor, cannot be NULL.
+ * @param pollfd the polling information, such as file descriptor, cannot be NULL;
+ * @param context the context registered with the event handler, can be NULL.
  */
-typedef void (*ud_event_handler_t)(ud_state_t *ud_state, struct pollfd *pollfd);
+typedef void (*ud_event_handler_t)(ud_state_t *ud_state, struct pollfd *pollfd, void *context);
 
 /**
  * Represents a short-lived task.
@@ -77,12 +78,24 @@ typedef void (*ud_event_handler_t)(ud_state_t *ud_state, struct pollfd *pollfd);
  *         terminated abnormally or a positive value to reschedule the task
  *         after N seconds.
  */
-typedef int (*ud_task_t)(ud_state_t *ud_state, int interval, void *context);
+typedef int (*ud_task_t)(ud_state_t *ud_state, uint16_t interval, void *context);
 
 /**
  * Denotes an identifier of event handlers.
  */
 typedef uint8_t eh_id_t;
+
+/**
+ * Denotes an invalid event handler ID.
+ */
+#define UD_INVALID_ID (uint8_t)(-1)
+
+/**
+ * Returns the current version of udaemon, as string.
+ *
+ * @return the version of udaemon as string.
+ */
+const char *ud_version(void);
 
 /**
  * Initializes a new udaemon state value.
@@ -103,17 +116,29 @@ ud_state_t *ud_init(ud_config_t *config);
 void ud_destroy(ud_state_t *ud_state);
 
 /**
+ * Tests whether or not a given event handler ID is valid.
+ *
+ * NOTE: this method only does a heuristic check. When this method returns
+ * true, there is no guarantee an event handler is still registered!
+ *
+ * @param event_handler_id the event handler ID to test.
+ */
+bool ud_valid_event_handler_id(eh_id_t event_handler_id);
+
+/**
  * Adds a new event handler for polling (file-based) events.
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param fd the file descriptor to poll;
  * @param emask the event mask to poll for;
  * @param callback the event callback to call once an event is available;
+ * @param context the (optional) context to pass to the event handler callback;
  * @param event_handler_id (optional) the event handler identifier that is
  * @return a non-zero value in case of errors, or zero in case of success.
  */
 int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
                          ud_event_handler_t callback,
+                         void *context,
                          eh_id_t *event_handler_id);
 
 /**
@@ -134,7 +159,7 @@ int ud_remove_event_handler(ud_state_t *ud_state, eh_id_t event_handler_id);
  * @param context the (optional) context to pass on to the task.
  * @return zero in case of success, a non-zero value in case of errors.
  */
-int ud_schedule_task(ud_state_t *ud_state, int interval,
+int ud_schedule_task(ud_state_t *ud_state, uint16_t interval,
                      ud_task_t task, void *context);
 
 /**

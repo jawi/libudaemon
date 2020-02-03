@@ -43,10 +43,10 @@ static run_state_t run_state = {
     .test_event_handler_id = 0,
 };
 
-static int reconnect_server(ud_state_t *ud_state, int interval, void *context);
+static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *context);
 static int disconnect_server(ud_state_t *ud_state);
 
-static void test_file_callback(ud_state_t *ud_state, struct pollfd *pollfd) {
+static void test_file_callback(ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
     if (pollfd->revents & (POLLHUP | POLLERR | POLLNVAL)) {
         log_info("Socket closed by server...");
 
@@ -90,7 +90,8 @@ static int connect_server(ud_state_t *ud_state, int port) {
 
     run_state.test_server_fd = sockfd;
 
-    if (ud_add_event_handler(ud_state, run_state.test_server_fd, POLLIN, test_file_callback, &run_state.test_event_handler_id)) {
+    if (ud_add_event_handler(ud_state, run_state.test_server_fd, POLLIN,
+                             test_file_callback, NULL, &run_state.test_event_handler_id)) {
         log_warning("Failed to register event handler!");
         return -1;
     }
@@ -119,7 +120,7 @@ static int disconnect_server(ud_state_t *ud_state) {
 }
 
 static int test_initialize(ud_state_t *ud_state) {
-    log_debug("Initializing test...");
+    log_debug("Initializing test, running against udaemon %s...", ud_version());
 
     if (connect_server(ud_state, PORT)) {
         return 1;
@@ -128,7 +129,7 @@ static int test_initialize(ud_state_t *ud_state) {
     return 0;
 }
 
-static int reconnect_server(ud_state_t *ud_state, int interval, void *context) {
+static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *context) {
     int rc;
 
     log_debug("Reconnecting to server (interval %d)...", interval);

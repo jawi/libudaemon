@@ -4,8 +4,6 @@
  * Copyright: (C) 2020 jawi
  *   License: Apache License 2.0
  */
-#define _GNU_SOURCE
-
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -20,6 +18,7 @@
 
 #include "udaemon/ud_logging.h"
 #include "udaemon/ud_utils.h"
+#include "udaemon/ud_version.h"
 #include "udaemon/udaemon.h"
 
 // Let's see how often this is not sufficient...
@@ -28,19 +27,23 @@
 
 typedef struct ud_taskdef {
     ud_task_t task;
-    int interval;
+    uint16_t interval;
     time_t next_deadline;
     void *context;
 } ud_taskdef_t;
 
+typedef struct ud_ehdef {
+    ud_event_handler_t callback;
+    void *context;
+} ud_ehdef_t;
+
 struct ud_state {
     ud_config_t *config;
     struct pollfd pollfds[FD_MAX];
-    ud_event_handler_t event_handlers[FD_MAX];
+    ud_ehdef_t event_handlers[FD_MAX];
     ud_taskdef_t task_queue[TASK_MAX];
 };
 
-static bool loop = true;
 static int event_pipe[2] = { 0, 0 };
 
 static int udaemon_initialize(ud_state_t *ud_state) {
@@ -94,14 +97,16 @@ static void os_signal_handler(int signo) {
     }
 }
 
-static void main_signal_handler(ud_state_t *ud_state, struct pollfd *pollfd) {
+static void main_signal_handler(ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
+    bool *loop = context;
+
     ud_signal_t signal = read_signal_event(pollfd->fd);
 
     udaemon_signal_handler(ud_state, signal);
 
     if (signal == SIG_TERM) {
         log_debug("terminating main event loop...");
-        loop = false;
+        *loop = false;
     }
 }
 
@@ -114,11 +119,15 @@ static void run_tasks(ud_state_t *ud_state, time_t now) {
             if (retval <= 0) {
                 taskdef->task = NULL;
             } else {
-                taskdef->interval = retval;
+                taskdef->interval = (uint16_t) retval;
                 taskdef->next_deadline = now + retval;
             }
         }
     }
+}
+
+const char *ud_version() {
+    return UD_VERSION;
 }
 
 ud_state_t *ud_init(ud_config_t *config) {
@@ -146,7 +155,12 @@ void ud_destroy(ud_state_t *ud_state) {
     }
 }
 
-int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask, ud_event_handler_t callback, eh_id_t *event_handler_id) {
+bool ud_valid_event_handler_id(eh_id_t event_handler_id) {
+    return event_handler_id < FD_MAX;
+}
+
+int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
+                         ud_event_handler_t callback, void *context, eh_id_t *event_handler_id) {
     if (ud_state == NULL || callback == NULL) {
         return -EINVAL;
     }
@@ -169,7 +183,10 @@ int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask, ud_event_han
     ud_state->pollfds[idx].events = emask;
     ud_state->pollfds[idx].revents = 0;
 
-    ud_state->event_handlers[idx] = callback;
+    ud_state->event_handlers[idx] = (ud_ehdef_t) {
+        .callback = callback,
+        .context = context,
+    };
 
     if (event_handler_id) {
         *event_handler_id = (eh_id_t) idx;
@@ -194,12 +211,13 @@ int ud_remove_event_handler(ud_state_t *ud_state, eh_id_t event_handler_id) {
     ud_state->pollfds[idx].events = 0;
     ud_state->pollfds[idx].revents = 0;
 
-    ud_state->event_handlers[idx] = NULL;
+    ud_state->event_handlers[idx].callback = NULL;
+    ud_state->event_handlers[idx].context = NULL;
 
     return 0;
 }
 
-int ud_schedule_task(ud_state_t *ud_state, int interval, ud_task_t task, void *context) {
+int ud_schedule_task(ud_state_t *ud_state, uint16_t interval, ud_task_t task, void *context) {
     if (ud_state == NULL) {
         return -EINVAL;
     }
@@ -229,6 +247,7 @@ int ud_schedule_task(ud_state_t *ud_state, int interval, ud_task_t task, void *c
 }
 
 int ud_main_loop(ud_state_t *ud_state) {
+    bool loop = true;
     int retval;
 
     // close any file descriptors we inherited...
@@ -265,7 +284,7 @@ int ud_main_loop(ud_state_t *ud_state) {
         goto cleanup;
     }
     // reserve this for our own events...
-    ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, NULL);
+    ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, &loop, NULL);
 
     if (!ud_state->config->foreground) {
         log_debug("Using PID file '%s', uid %d, gid %d",
@@ -312,7 +331,9 @@ int ud_main_loop(ud_state_t *ud_state) {
             for (int i = 0; i < FD_MAX; i++) {
                 if (ud_state->pollfds[i].revents) {
                     // something of interest happened...
-                    (*ud_state->event_handlers[i])(ud_state, &ud_state->pollfds[i]);
+                    ud_event_handler_t callback = ud_state->event_handlers[i].callback;
+                    void *context = ud_state->event_handlers[i].context;
+                    callback(ud_state, &ud_state->pollfds[i], context);
                 }
             }
         }

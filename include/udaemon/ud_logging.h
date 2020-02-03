@@ -32,32 +32,28 @@ void destroy_logging(void);
 /**
  * Logs a message on debug level.
  *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
+ * @param msg the log message; any message parameter can be added after the message.
  */
 void log_debug(const char *msg, ...);
 
 /**
  * Logs a message on info level.
  *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
+ * @param msg the log message; any message parameter can be added after the message.
  */
 void log_info(const char *msg, ...);
 
 /**
  * Logs a message on warning level.
  *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
+ * @param msg the log message; any message parameter can be added after the message.
  */
 void log_warning(const char *msg, ...);
 
 /**
  * Logs a message on error level.
  *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
+ * @param msg the log message; any message parameter can be added after the message.
  */
 void log_error(const char *msg, ...);
 
