@@ -166,7 +166,7 @@ static int test_cleanup(ud_state_t *ud_state) {
 int main(int argc, char *argv[]) {
     ud_config_t daemon_config = {
         .progname = PROGNAME,
-        .pid_file = PID_FILE,
+        .pid_file = NULL,
         .initialize = test_initialize,
         .signal_handler = test_signal_handler,
         .cleanup = test_cleanup,
@@ -197,6 +197,10 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
+    // Use sane defaults...
+    if (daemon_config.pid_file == NULL) {
+        daemon_config.pid_file = strdup(PID_FILE);
+    }
 
     ud_state_t *daemon = ud_init(&daemon_config);
 
@@ -204,9 +208,7 @@ int main(int argc, char *argv[]) {
 
     ud_destroy(daemon);
 
-    if (daemon_config.pid_file && daemon_config.pid_file != PID_FILE) {
-        free(daemon_config.pid_file);
-    }
+    free(daemon_config.pid_file);
 
     return retval;
 }
