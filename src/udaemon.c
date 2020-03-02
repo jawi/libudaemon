@@ -4,6 +4,8 @@
  * Copyright: (C) 2020 jawi
  *   License: Apache License 2.0
  */
+#define _POSIX_C_SOURCE 200809L
+
 #include <errno.h>
 #include <poll.h>
 #include <signal.h>
@@ -137,7 +139,7 @@ ud_state_t *ud_init(ud_config_t *config) {
         return NULL;
     }
     // Clear out the initial state...
-    bzero(state, sizeof(ud_state_t));
+    memset(state, 0, sizeof(ud_state_t));
 
     state->config = config;
 
