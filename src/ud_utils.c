@@ -68,7 +68,11 @@ static void ud_closefrom_proc(DIR *dirp, int lowfd, int maxfd) {
             // don't close ourselves, or outside our defined boundaries...
             continue;
         }
+#ifdef USE_CLOEXEC
+        fcntl((int) fd, F_SETFD, FD_CLOEXEC);
+#else
         close((int) fd);
+#endif
     }
 }
 
