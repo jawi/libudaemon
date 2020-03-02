@@ -24,15 +24,27 @@ typedef enum ud_daemon_result {
 } ud_daemon_result;
 
 /**
+ * Utility method to close/delete all open file descriptors for the current
+ * process. It mimicks the `closefrom` syscall that is available in *BSD and/or
+ * other UNIX variants.
+ *
+ * If the given argument is invalid, errno is set to EINVAL and nothing is closed.
+ *
+ * @param lowfd the file descriptor (exclusive) to start closing/deleting from.
+ *        Should be greater than zero.
+ */
+void ud_closefrom(int lowfd);
+
+/**
  * Daemonizes the current process into the background.
- * 
+ *
  * This method will drop privileges to the given user and group, as well as
  * write a PID file to indicate the process ID of the daemonized process.
- * 
+ *
  * NOTE: calling this function causes the calling (= parent) process to
  * terminate *after* the daemonization process is complete. This function
  * returns as the running, daemonized, process.
- * 
+ *
  * @param pid_file the PID file to write with the PID of the background process;
  * @param uid the owning user ID of the PID file;
  * @param gid the owning group ID of the PID file.

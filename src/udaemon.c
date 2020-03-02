@@ -253,10 +253,8 @@ int ud_main_loop(ud_state_t *ud_state) {
     int retval;
 
     // close any file descriptors we inherited...
-    const long max_fd = sysconf(_SC_OPEN_MAX);
-    for (int fd = 3; fd < max_fd; fd++) {
-        close(fd);
-    }
+    ud_closefrom(STDERR_FILENO);
+
     // do this *after* we've closed the file descriptors!
     init_logging(ud_state->config->progname, ud_state->config->debug, ud_state->config->foreground);
 

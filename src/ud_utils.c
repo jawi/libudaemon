@@ -5,22 +5,108 @@
  *   License: Apache License 2.0
  */
 #define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
 
 #include <ctype.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-#include <sys/types.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 
 #include "udaemon/ud_utils.h"
 #include "udaemon/ud_logging.h"
+
+/**
+ * Converts a given string to a numeric value, presuming it represents a
+ * positive integer value.
+ *
+ * @param str the string to convert to a number, cannot be NULL.
+ * @return the numeric representation of the given string, or -1
+ *         if the given value could not be completely parsed.
+ */
+static int64_t strtonum(const char *name) {
+    char *ep = NULL;
+
+    int64_t result = strtol(name, &ep, 10);
+    if (*ep != '\0') {
+        // name was not entirely parsed...
+        return -1;
+    }
+    return result;
+}
+
+/**
+ * Closes all file descriptors that fall inside the given range of file
+ * descriptors. This can take a long time with a large ulimit!
+ */
+static void ud_closefrom_fallback(int lowfd, int maxfd) {
+    for (int fd = lowfd + 1; fd < maxfd; fd++) {
+        close(fd);
+    }
+}
+
+/**
+ * Closes all file descriptors found in `/proc/self/fd` that fall inside the
+ * given range of file descriptors.
+ */
+static void ud_closefrom_proc(DIR *dirp, int lowfd, int maxfd) {
+    struct dirent *entry;
+
+    while ((entry = readdir(dirp)) != NULL) {
+        int64_t fd = strtonum(entry->d_name);
+        if ((fd == dirfd(dirp)) || (fd <= lowfd) || (fd > maxfd)) {
+            // don't close ourselves, or outside our defined boundaries...
+            continue;
+        }
+        close((int) fd);
+    }
+}
+
+#define SATURATE(n) (int)(((n) > __INT_MAX__) ? __INT_MAX__ : ((n) <= 0) ? 1024 : (n))
+
+/**
+ * Linux does not provide a `closefrom` syscall, hence we need to implement such
+ * functionality ourselves.
+ */
+void ud_closefrom(int lowfd) {
+    if (lowfd < 0) {
+        errno = EINVAL;
+        return;
+    }
+
+    struct rlimit rl;
+    int maxfd;
+
+    if (getrlimit(RLIMIT_NOFILE, &rl) == 0 && rl.rlim_max != RLIM_INFINITY) {
+        maxfd = SATURATE(rl.rlim_max);
+    } else {
+        maxfd = SATURATE(sysconf(_SC_OPEN_MAX));
+    }
+
+    const char *path = "/proc/self/fd";
+
+    DIR *dirp = opendir(path);
+    if (dirp == NULL) {
+        fprintf(stderr, "closing using fallback from %d..%d\n", lowfd, maxfd);
+
+        ud_closefrom_fallback(lowfd, (int) maxfd);
+    } else {
+        fprintf(stderr, "closing using proc from %d..%d\n", lowfd, maxfd);
+
+        ud_closefrom_proc(dirp, lowfd, (int) maxfd);
+        (void)closedir(dirp);
+    }
+}
 
 /**
  * Drops the privileges of the running process to the user identified by the given UID/GID.
