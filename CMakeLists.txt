@@ -6,6 +6,9 @@ project(
     LANGUAGES C
 )
 
+include(CheckSymbolExists)
+check_symbol_exists(FD_CLOEXEC "fcntl.h" HAVE_FD_CLOEXEC)
+
 # generate an include file with the current version information
 configure_file(
     cmake/ud_version.h.in ${CMAKE_CURRENT_SOURCE_DIR}/include/udaemon/ud_version.h @ONLY

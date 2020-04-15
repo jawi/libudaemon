@@ -63,11 +63,55 @@ static void udaemon_signal_handler(ud_state_t *ud_state, ud_signal_t signal) {
     }
 }
 
-static int udaemon_cleanup(ud_state_t *ud_state) {
-    if (ud_state->config->cleanup) {
-        return ud_state->config->cleanup(ud_state);
+static int udaemon_replace_config(ud_state_t *ud_state, void *new_cfg) {
+    ud_config_t *ud_cfg = ud_state->config;
+    void *old_cfg = ud_cfg->config;
+    ud_cfg->config = new_cfg;
+
+    if (old_cfg) {
+        log_debug("Cleaning up configuration...");
+
+        if (ud_cfg->config_cleanup) {
+            ud_cfg->config_cleanup(old_cfg);
+        } else {
+            // best effort; hope we do not leave stuff behind...
+            log_debug("No config_cleanup hook defined! Using default configuration cleanup!");
+
+            free(old_cfg);
+        }
     }
     return 0;
+}
+
+static int udaemon_read_config(ud_state_t *ud_state) {
+    ud_config_t *ud_cfg = ud_state->config;
+    if (ud_cfg->conf_file && ud_cfg->config_parser) {
+        if (ud_cfg->config) {
+            log_debug("Reloading configuration from %s", ud_cfg->conf_file);
+        } else {
+            log_debug("Loading configuration from %s", ud_cfg->conf_file);
+        }
+
+        void *new_cfg = ud_cfg->config_parser(ud_cfg->conf_file, ud_cfg->config);
+        if (!new_cfg) {
+            // leave the existing configuration as-is...
+            return 1;
+        }
+        return udaemon_replace_config(ud_state, new_cfg);
+    }
+    return 0;
+}
+
+static int udaemon_cleanup(ud_state_t *ud_state) {
+    int retval;
+    if (ud_state->config->cleanup) {
+        retval = ud_state->config->cleanup(ud_state);
+        if (retval) {
+            log_warning("Failed to perform cleanup!");
+        }
+    }
+    // Cleanup the configuration, if any...
+    return udaemon_replace_config(ud_state, NULL);
 }
 
 static uint8_t read_signal_event(int fd) {
@@ -104,10 +148,14 @@ static void main_signal_handler(ud_state_t *ud_state, struct pollfd *pollfd, voi
 
     ud_signal_t signal = read_signal_event(pollfd->fd);
 
+    if (signal == SIG_HUP) {
+        udaemon_read_config(ud_state);
+    }
+
     udaemon_signal_handler(ud_state, signal);
 
     if (signal == SIG_TERM) {
-        log_debug("terminating main event loop...");
+        log_debug("Terminating main event loop...");
         *loop = false;
     }
 }
@@ -155,6 +203,18 @@ void ud_destroy(ud_state_t *ud_state) {
     if (ud_state) {
         free(ud_state);
     }
+}
+
+void *ud_get_app_config(ud_state_t *ud_state) {
+    if (ud_state) {
+        ud_config_t *ud_cfg = ud_state->config;
+        // if we're configured *and* there's a config file set *then*
+        // presume there's a valid application configuration present...
+        if (ud_cfg && ud_cfg->conf_file) {
+            return ud_cfg->config;
+        }
+    }
+    return NULL;
 }
 
 bool ud_valid_event_handler_id(eh_id_t event_handler_id) {
@@ -309,6 +369,11 @@ int ud_main_loop(ud_state_t *ud_state) {
     if (retval) {
         log_warning("Initialization failed!");
         goto cleanup;
+    }
+
+    retval = udaemon_read_config(ud_state);
+    if (retval) {
+        log_warning("Failed to read/parse configuration!");
     }
 
     while (loop) {

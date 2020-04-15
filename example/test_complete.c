@@ -27,32 +27,40 @@
 #define PROGNAME "test"
 #define VERSION "1.0"
 
+#define CONF_FILE "test.cfg"
 #define PID_FILE "/var/run/test.pid"
 
 #define PORT 9000
 
 typedef struct {
+    int server_port;
+    char *msg;
+} test_config_t;
+
+typedef struct {
+    bool connected;
     int test_server_fd;
     struct sockaddr_in test_server;
     eh_id_t test_event_handler_id;
 } run_state_t;
 
-static run_state_t run_state = {
+static run_state_t _run_state = {
+    .connected = false,
     .test_server_fd = 0,
     .test_server = 0,
     .test_event_handler_id = 0,
 };
 
 static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *context);
-static int disconnect_server(ud_state_t *ud_state);
+static int disconnect_server(ud_state_t *ud_state, void *context);
 
 static void test_file_callback(ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
+    run_state_t *run_state = context;
+
     if (pollfd->revents & (POLLHUP | POLLERR | POLLNVAL)) {
         log_info("Socket closed by server...");
 
-        disconnect_server(ud_state);
-
-        ud_schedule_task(ud_state, 0, reconnect_server, NULL);
+        ud_schedule_task(ud_state, 0, reconnect_server, context);
     }
     if ((pollfd->revents & POLLIN)) {
         static uint8_t buf[128] = { 0 };
@@ -62,20 +70,27 @@ static void test_file_callback(ud_state_t *ud_state, struct pollfd *pollfd, void
         } else if (cnt == 0) {
             log_info("Socket closed by server (EOF)...");
 
-            disconnect_server(ud_state);
+            // Signal that we no longer want to read anything; otherwise
+            // we are called many times more after this call with the same
+            // signal. This task will terminate when `reconnect_server` is
+            // called, so it does not make us lose anything...
+            pollfd->events = pollfd->events & ~POLLIN;
 
-            ud_schedule_task(ud_state, 0, reconnect_server, NULL);
+            ud_schedule_task(ud_state, 0, reconnect_server, context);
         } else {
             log_warning("Error obtained while reading from server?!");
         }
     }
 }
 
-static int connect_server(ud_state_t *ud_state, int port) {
-    bzero(&run_state.test_server, sizeof(run_state.test_server));
-    run_state.test_server.sin_family = AF_INET;
-    run_state.test_server.sin_port = htons(port);
-    run_state.test_server.sin_addr.s_addr = inet_addr("127.0.0.1");
+static int connect_server(ud_state_t *ud_state, void *context) {
+    test_config_t *cfg = ud_get_app_config(ud_state);
+    run_state_t *run_state = context;
+
+    bzero(&run_state->test_server, sizeof(run_state->test_server));
+    run_state->test_server.sin_family = AF_INET;
+    run_state->test_server.sin_port = htons(cfg->server_port);
+    run_state->test_server.sin_addr.s_addr = inet_addr("127.0.0.1");
 
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) {
@@ -83,15 +98,15 @@ static int connect_server(ud_state_t *ud_state, int port) {
         return -1;
     }
 
-    if (connect(sockfd, (struct sockaddr *)&run_state.test_server, sizeof(run_state.test_server))) {
+    if (connect(sockfd, (struct sockaddr *)&run_state->test_server, sizeof(run_state->test_server))) {
         log_error("Unable to connect to server!");
         return 1;
     }
 
-    run_state.test_server_fd = sockfd;
+    run_state->test_server_fd = sockfd;
 
-    if (ud_add_event_handler(ud_state, run_state.test_server_fd, POLLIN,
-                             test_file_callback, NULL, &run_state.test_event_handler_id)) {
+    if (ud_add_event_handler(ud_state, run_state->test_server_fd, POLLIN,
+                             test_file_callback, context, &run_state->test_event_handler_id)) {
         log_warning("Failed to register event handler!");
         return -1;
     }
@@ -99,49 +114,54 @@ static int connect_server(ud_state_t *ud_state, int port) {
     return 0;
 }
 
-static int disconnect_server(ud_state_t *ud_state) {
-    int old_fd = run_state.test_server_fd;
-    run_state.test_server_fd = 0;
+static int disconnect_server(ud_state_t *ud_state, void *context) {
+    run_state_t *run_state = context;
+
+    int old_fd = run_state->test_server_fd;
+    run_state->test_server_fd = 0;
 
     if (old_fd) {
         close(old_fd);
     }
 
-    if (run_state.test_event_handler_id) {
-        if (ud_remove_event_handler(ud_state, run_state.test_event_handler_id)) {
+    if (run_state->test_event_handler_id) {
+        if (ud_remove_event_handler(ud_state, run_state->test_event_handler_id)) {
             log_debug("Failed to remove event handler?!");
             return -1;
         }
 
-        run_state.test_event_handler_id = 0;
-    }
-
-    return 0;
-}
-
-static int test_initialize(ud_state_t *ud_state) {
-    log_debug("Initializing test, running against udaemon %s...", ud_version());
-
-    if (connect_server(ud_state, PORT)) {
-        return 1;
+        run_state->test_event_handler_id = 0;
     }
 
     return 0;
 }
 
 static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *context) {
+    run_state_t *run_state = context;
+
     int rc;
 
-    log_debug("Reconnecting to server (interval %d)...", interval);
+    if (run_state->connected) {
+        log_debug("Reconnecting to server (interval %d)...", interval);
 
-    rc = disconnect_server(ud_state);
-    if (rc < 0) {
-        return rc;
+        rc = disconnect_server(ud_state, context);
+        if (rc < 0) {
+            // signal error...
+            return rc;
+        }
+    } else {
+        log_debug("Connecting to server (interval %d)...", interval);
     }
 
-    rc = connect_server(ud_state, PORT);
-    if (rc <= 0) {
+    rc = connect_server(ud_state, context);
+    if (rc < 0) {
+        // signal error...
         return rc;
+    } else if (rc == 0) {
+        // all is well...
+        run_state->connected = true;
+
+        return 0;
     }
 
     return interval ? interval << 1 : 1;
@@ -150,34 +170,65 @@ static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *conte
 static void test_signal_handler(ud_state_t *ud_state, ud_signal_t signal) {
     if (signal == SIG_HUP) {
         // close and recreate socket connection...
-        reconnect_server(ud_state, 0, NULL);
+        reconnect_server(ud_state, 0, &_run_state);
     } else {
         log_debug("Got signal: %d", signal);
     }
 }
 
+static int test_initialize(ud_state_t *ud_state) {
+    log_debug("Initializing test, running against udaemon %s...", ud_version());
+
+    return ud_schedule_task(ud_state, 0, reconnect_server, &_run_state);
+}
+
 static int test_cleanup(ud_state_t *ud_state) {
     log_debug("Cleaning up test...");
 
-    disconnect_server(ud_state);
+    disconnect_server(ud_state, &_run_state);
 
     return 0;
+}
+
+static void *test_config_parser(const char *conf_file, void *config) {
+    log_debug("Parsing test configuration...");
+
+    test_config_t *cfg = malloc(sizeof(test_config_t));
+    cfg->server_port = PORT;
+    cfg->msg = strdup("hello world!");
+    return cfg;
+}
+
+static void test_config_free(void *config) {
+    log_debug("Freeing test configuration...");
+
+    test_config_t *cfg = config;
+
+    free(cfg->msg);
+    free(cfg);
 }
 
 int main(int argc, char *argv[]) {
     ud_config_t daemon_config = {
         .progname = PROGNAME,
         .pid_file = NULL,
+        .conf_file = NULL,
         .initialize = test_initialize,
         .signal_handler = test_signal_handler,
         .cleanup = test_cleanup,
+        // configuration handling...
+        .config_parser = test_config_parser,
+        .config_cleanup = test_config_free,
     };
 
     // parse arguments...
     int opt;
 
-    while ((opt = getopt(argc, argv, "dfhp:v")) != -1) {
+    while ((opt = getopt(argc, argv, "c:dfhp:v")) != -1) {
         switch (opt) {
+        case 'c':
+            daemon_config.conf_file = strdup(optarg);
+            break;
         case 'd':
             daemon_config.debug = true;
             break;
@@ -199,6 +250,9 @@ int main(int argc, char *argv[]) {
         }
     }
     // Use sane defaults...
+    if (daemon_config.conf_file == NULL) {
+        daemon_config.conf_file = strdup(CONF_FILE);
+    }
     if (daemon_config.pid_file == NULL) {
         daemon_config.pid_file = strdup(PID_FILE);
     }
@@ -209,6 +263,7 @@ int main(int argc, char *argv[]) {
 
     ud_destroy(daemon);
 
+    free(daemon_config.conf_file);
     free(daemon_config.pid_file);
 
     return retval;

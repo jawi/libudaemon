@@ -68,9 +68,11 @@ static void ud_closefrom_proc(DIR *dirp, int lowfd, int maxfd) {
             // don't close ourselves, or outside our defined boundaries...
             continue;
         }
-#ifdef USE_CLOEXEC
+#ifdef HAVE_FD_CLOEXEC
+        // close automatically when execve is performed...
         fcntl((int) fd, F_SETFD, FD_CLOEXEC);
 #else
+        // close directly; presume we don't need it anymore...
         close((int) fd);
 #endif
     }
@@ -101,11 +103,11 @@ void ud_closefrom(int lowfd) {
 
     DIR *dirp = opendir(path);
     if (dirp == NULL) {
-        fprintf(stderr, "closing using fallback from %d..%d\n", lowfd, maxfd);
+        log_debug("closing using fallback from %d..%d\n", lowfd, maxfd);
 
         ud_closefrom_fallback(lowfd, (int) maxfd);
     } else {
-        fprintf(stderr, "closing using proc from %d..%d\n", lowfd, maxfd);
+        log_debug("closing using proc from %d..%d\n", lowfd, maxfd);
 
         ud_closefrom_proc(dirp, lowfd, (int) maxfd);
         (void)closedir(dirp);

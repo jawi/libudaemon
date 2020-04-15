@@ -46,6 +46,10 @@ typedef struct ud_config {
     char *progname;
     /** the path to the PID file to write when running as daemon. */
     char *pid_file;
+    /** the path to the configuration file. */
+    char *conf_file;
+    /** the actual configuration. */
+    void *config;
 
     // Hooks and callbacks...
 
@@ -57,6 +61,10 @@ typedef struct ud_config {
     void (*idle_handler)(ud_state_t *ud_state);
     /** called during cleanup of udaemon. */
     int (*cleanup)(ud_state_t *ud_state);
+    /** called for parsing the configuration. */
+    void*(*config_parser)(const char *conf_file, void *config);
+    /** called when the configuration needs to be freed. */
+    void (*config_cleanup)(void *config);
 } ud_config_t;
 
 /**
@@ -114,6 +122,14 @@ ud_state_t *ud_init(ud_config_t *config);
  * @param ud_state the udaemon state to use, may be NULL.
  */
 void ud_destroy(ud_state_t *ud_state);
+
+/**
+ * Provides access to the application configuration.
+ * 
+ * @param ud_state the udaemon state to use, cannot be NULL.
+ * @return the application configuration, if defined, can be NULL.
+ */
+void *ud_get_app_config(ud_state_t *ud_state);
 
 /**
  * Tests whether or not a given event handler ID is valid.
