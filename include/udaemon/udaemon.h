@@ -44,9 +44,9 @@ typedef struct ud_config {
     gid_t priv_group;
     /** the program name to use for logging purposes. */
     char *progname;
-    /** the path to the PID file to write when running as daemon. */
+    /** the absolute path to the PID file to write when running as daemon. */
     char *pid_file;
-    /** the path to the configuration file. */
+    /** the absolute path to the configuration file. */
     char *conf_file;
 
     // Hooks and callbacks...
@@ -109,12 +109,12 @@ typedef struct ud_config {
 
 /**
  * Callback event handler for polled event handling.
- * 
+ *
  * Event handlers are called automatically when a poll()-event is retrieved. In
  * all cases, the implementation must take care of error handling. Note that in
  * case of POLLIN, the number of bytes that can be read can be 0 in case of an
- * EOF condition. Be aware that in such cases the event handler can/will be 
- * called multiple times if the file descriptor is not closed or otherwise 
+ * EOF condition. Be aware that in such cases the event handler can/will be
+ * called multiple times if the file descriptor is not closed or otherwise
  * ignored from reading. A solution for this is to clear the POLLIN bit from
  * pollfd->event.
  *
@@ -189,7 +189,7 @@ const void *ud_get_app_config(const ud_state_t *ud_state);
 
 /**
  * Provides access to the application-specific state.
- * 
+ *
  * @param ud_state the udaemon state to use, cannot be NULL.
  * @return the application state, can be NULL if not defined.
  * @see ud_set_app_state
@@ -198,13 +198,13 @@ void *ud_get_app_state(const ud_state_t *ud_state);
 
 /**
  * Sets/replaces the application-specific state.
- * 
+ *
  * The application can use this to retain state while udaemon is running, for
  * example, to store other objects that are needed in event handlers or tasks.
- * 
+ *
  * Note that the calling application is responsible for the memory management
  * of the given/returned application state.
- * 
+ *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param app_state the new application state to set, may be NULL.
  * @return the old application state, can be NULL if not defined.
@@ -223,6 +223,11 @@ bool ud_valid_event_handler_id(const eh_id_t event_handler_id);
 
 /**
  * Adds a new event handler for polling (file-based) events.
+ *
+ * The context supplied is specific for the event handler that is being
+ * registered! It is allowed to give each event handler a completely different
+ * context. One could also pass NULL as context and simply use the application
+ * context (see #ud_get_app_context()).
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param fd the file descriptor to poll;
@@ -249,6 +254,11 @@ int ud_remove_event_handler(const ud_state_t *ud_state, const eh_id_t event_hand
 /**
  * Schedules a given task to be executed after a given interval.
  *
+ * The context supplied is specific for the task that is being registered! It
+ * is allowed to give each task a completely different context. One could also
+ * pass NULL as context and simply use the application context
+ * (see #ud_get_app_context()).
+ *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param interval the interval in seconds to schedule the task in;
  * @param task the task to schedule;
@@ -267,11 +277,22 @@ int ud_schedule_task(const ud_state_t *ud_state, const uint16_t interval,
  * Scheduled tasks are invoked when their deadline is hit.
  *
  * This method will return if the main loop is terminated by either a SIGINT or
- * SIGTERM.
+ * SIGTERM, or by programmatically calling `ud_terminate`.
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @return non-zero in case of errors, zero if successful.
  */
 int ud_main_loop(ud_state_t *ud_state);
+
+/**
+ * Allows the application to programmatically terminate the mainloop of udaemon.
+ *
+ * NOTE: after calling this method the udaemon state should still be destroyed!
+
+ * @param ud_state the udaemon state to use, cannot be NULL;
+ * @return non-zero in case of errors, zero if successful.
+ * @see ud_destroy
+ */
+int ud_terminate(const ud_state_t *ud_state);
 
 #endif /* UDAEMON_H_ */

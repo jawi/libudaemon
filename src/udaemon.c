@@ -40,6 +40,7 @@ typedef struct ud_ehdef {
 } ud_ehdef_t;
 
 struct ud_state {
+    volatile bool running;
     const ud_config_t *ud_config;
     /** the actual application configuration. */
     void *app_config;
@@ -71,13 +72,14 @@ static void udaemon_signal_handler(const ud_state_t *ud_state, ud_signal_t signa
     }
 }
 
-static int udaemon_replace_config(ud_state_t *ud_state, void *new_app_cfg) {
-    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
-
+static int udaemon_replace_config(const ud_state_t *ud_state, void *new_app_cfg) {
     void *old_app_cfg = ud_state->app_config;
-    ud_state->app_config = new_app_cfg;
+    // remove the const-ness to allow changing the configuration...
+    ((ud_state_t *) ud_state)->app_config = new_app_cfg;
 
     if (old_app_cfg) {
+        const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+
         log_debug("Cleaning up configuration...");
 
         if (ud_cfg->config_cleanup) {
@@ -92,7 +94,7 @@ static int udaemon_replace_config(ud_state_t *ud_state, void *new_app_cfg) {
     return 0;
 }
 
-static int udaemon_read_config(ud_state_t *ud_state) {
+static int udaemon_read_config(const ud_state_t *ud_state) {
     const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
 
     if (ud_cfg->conf_file && ud_cfg->config_parser) {
@@ -156,19 +158,19 @@ static void os_signal_handler(int signo) {
 }
 
 static void main_signal_handler(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
-    bool *loop = context;
+    (void)context;
 
     ud_signal_t signal = read_signal_event(pollfd->fd);
 
     if (signal == SIG_HUP) {
-        udaemon_read_config((ud_state_t *) ud_state);
+        udaemon_read_config(ud_state);
     }
 
     udaemon_signal_handler(ud_state, signal);
 
     if (signal == SIG_TERM) {
         log_debug("Terminating main event loop...");
-        *loop = false;
+        ud_terminate(ud_state);
     }
 }
 
@@ -353,7 +355,6 @@ int ud_schedule_task(const ud_state_t *ud_state, uint16_t interval, ud_task_t ta
 int ud_main_loop(ud_state_t *ud_state) {
     const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
 
-    bool loop = true;
     int retval;
 
     // close any file descriptors we inherited...
@@ -387,14 +388,12 @@ int ud_main_loop(ud_state_t *ud_state) {
         perror("pipe");
         goto cleanup;
     }
-    // reserve this for our own events...
-    ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, &loop, NULL);
 
-    // read configuration right before we're dropping privileges...
-    retval = udaemon_read_config(ud_state);
-    if (retval) {
-        log_warning("Failed to read/parse configuration! Trying to continue with defaults...");
-    }
+    // Indicate that we're currently running...
+    ud_state->running = true;
+
+    // reserve this for our own events...
+    ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, NULL, NULL);
 
     if (!ud_cfg->foreground) {
         log_debug("Using PID file '%s', uid %d, gid %d",
@@ -410,13 +409,19 @@ int ud_main_loop(ud_state_t *ud_state) {
         }
     }
 
+    // read configuration right after we've dropped privileges...
+    retval = udaemon_read_config(ud_state);
+    if (retval) {
+        log_warning("Failed to read/parse application configuration! Trying to continue with defaults...");
+    }
+
     retval = udaemon_initialize(ud_state);
     if (retval) {
         log_warning("Initialization failed!");
         goto cleanup;
     }
 
-    while (loop) {
+    while (ud_state->running) {
         // Run all pending tasks first...
         run_tasks(ud_state, time(NULL));
 
@@ -463,4 +468,12 @@ cleanup:
     close(event_pipe[1]);
 
     return 0;
+}
+
+int ud_terminate(const ud_state_t *ud_state) {
+    if (ud_state) {
+        ((ud_state_t *) ud_state)->running = false;
+        return 0;
+    }
+    return 1;
 }
