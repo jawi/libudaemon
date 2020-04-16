@@ -41,8 +41,11 @@ typedef struct ud_ehdef {
 
 struct ud_state {
     const ud_config_t *ud_config;
-    /** the actual configuration. */
+    /** the actual application configuration. */
     void *app_config;
+    /** the application state. */
+    void *app_state;
+
     struct pollfd pollfds[FD_MAX];
     ud_ehdef_t event_handlers[FD_MAX];
     ud_taskdef_t task_queue[TASK_MAX];
@@ -229,6 +232,22 @@ const void *ud_get_app_config(const ud_state_t *ud_state) {
         return ud_state->app_config;
     }
     return NULL;
+}
+
+void *ud_get_app_state(const ud_state_t *ud_state) {
+    if (ud_state) {
+        return ud_state->app_state;
+    }
+    return NULL;
+}
+
+void *ud_set_app_state(const ud_state_t *ud_state, void *app_state) {
+    void *old_state = ud_get_app_state(ud_state);
+    if (ud_state) {
+        // remove the const-ness to update our internal state...
+        ((ud_state_t *) ud_state)->app_state = app_state;
+    }
+    return old_state;
 }
 
 bool ud_valid_event_handler_id(eh_id_t event_handler_id) {

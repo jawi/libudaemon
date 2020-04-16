@@ -44,13 +44,6 @@ typedef struct {
     eh_id_t test_event_handler_id;
 } run_state_t;
 
-static run_state_t _run_state = {
-    .connected = false,
-    .test_server_fd = 0,
-    .test_server = 0,
-    .test_event_handler_id = 0,
-};
-
 static int reconnect_server(const ud_state_t *ud_state, const uint16_t interval, void *context);
 static int disconnect_server(const ud_state_t *ud_state, void *context);
 
@@ -169,24 +162,31 @@ static int reconnect_server(const ud_state_t *ud_state, const uint16_t interval,
 
 static void test_signal_handler(const ud_state_t *ud_state, ud_signal_t signal) {
     if (signal == SIG_HUP) {
+        run_state_t *run_state = ud_get_app_state(ud_state);
+
         // close and recreate socket connection...
-        ud_schedule_task(ud_state, 0, reconnect_server, &_run_state);
+        ud_schedule_task(ud_state, 0, reconnect_server, run_state);
     } else {
         log_debug("Got signal: %d", signal);
     }
 }
 
 static int test_initialize(const ud_state_t *ud_state) {
+    run_state_t *run_state = ud_get_app_state(ud_state);
+
     log_debug("Initializing test, running against udaemon %s...", ud_version());
     log_debug("Application configuration is %s", ud_get_app_config(ud_state) ? "present" : "NOT present");
+    log_debug("Application state is %s", run_state ? "present" : "NOT present");
 
-    return ud_schedule_task(ud_state, 0, reconnect_server, &_run_state);
+    return ud_schedule_task(ud_state, 0, reconnect_server, run_state);
 }
 
 static int test_cleanup(const ud_state_t *ud_state) {
+    run_state_t *run_state = ud_get_app_state(ud_state);
+
     log_debug("Cleaning up test...");
 
-    disconnect_server(ud_state, &_run_state);
+    disconnect_server(ud_state, run_state);
 
     return 0;
 }
@@ -210,6 +210,13 @@ static void test_config_free(void *config) {
 }
 
 int main(int argc, char *argv[]) {
+    run_state_t run_state = {
+        .connected = false,
+        .test_server_fd = 0,
+        .test_server = 0,
+        .test_event_handler_id = 0,
+    };
+
     ud_config_t daemon_config = {
         .progname = PROGNAME,
         .pid_file = NULL,
@@ -259,6 +266,8 @@ int main(int argc, char *argv[]) {
     }
 
     ud_state_t *daemon = ud_init(&daemon_config);
+
+    ud_set_app_state(daemon, &run_state);
 
     int retval = ud_main_loop(daemon);
 

@@ -188,6 +188,30 @@ const ud_config_t *ud_get_udaemon_config(const ud_state_t *ud_state);
 const void *ud_get_app_config(const ud_state_t *ud_state);
 
 /**
+ * Provides access to the application-specific state.
+ * 
+ * @param ud_state the udaemon state to use, cannot be NULL.
+ * @return the application state, can be NULL if not defined.
+ * @see ud_set_app_state
+ */
+void *ud_get_app_state(const ud_state_t *ud_state);
+
+/**
+ * Sets/replaces the application-specific state.
+ * 
+ * The application can use this to retain state while udaemon is running, for
+ * example, to store other objects that are needed in event handlers or tasks.
+ * 
+ * Note that the calling application is responsible for the memory management
+ * of the given/returned application state.
+ * 
+ * @param ud_state the udaemon state to use, cannot be NULL;
+ * @param app_state the new application state to set, may be NULL.
+ * @return the old application state, can be NULL if not defined.
+ */
+void *ud_set_app_state(const ud_state_t *ud_state, void *app_state);
+
+/**
  * Tests whether or not a given event handler ID is valid.
  *
  * NOTE: this method only does a heuristic check. When this method returns
