@@ -40,7 +40,9 @@ typedef struct ud_ehdef {
 } ud_ehdef_t;
 
 struct ud_state {
-    ud_config_t *config;
+    const ud_config_t *ud_config;
+    /** the actual configuration. */
+    void *app_config;
     struct pollfd pollfds[FD_MAX];
     ud_ehdef_t event_handlers[FD_MAX];
     ud_taskdef_t task_queue[TASK_MAX];
@@ -48,51 +50,56 @@ struct ud_state {
 
 static int event_pipe[2] = { 0, 0 };
 
-static int udaemon_initialize(ud_state_t *ud_state) {
-    if (ud_state->config->initialize) {
-        return ud_state->config->initialize(ud_state);
+static int udaemon_initialize(const ud_state_t *ud_state) {
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+
+    if (ud_cfg->initialize) {
+        return ud_cfg->initialize(ud_state);
     }
     return 0;
 }
 
-static void udaemon_signal_handler(ud_state_t *ud_state, ud_signal_t signal) {
-    if (ud_state->config->signal_handler) {
-        ud_state->config->signal_handler(ud_state, signal);
+static void udaemon_signal_handler(const ud_state_t *ud_state, ud_signal_t signal) {
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+    if (ud_cfg->signal_handler) {
+        ud_cfg->signal_handler(ud_state, signal);
     } else {
         log_debug("received signal: %d", signal);
     }
 }
 
-static int udaemon_replace_config(ud_state_t *ud_state, void *new_cfg) {
-    ud_config_t *ud_cfg = ud_state->config;
-    void *old_cfg = ud_cfg->config;
-    ud_cfg->config = new_cfg;
+static int udaemon_replace_config(ud_state_t *ud_state, void *new_app_cfg) {
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
 
-    if (old_cfg) {
+    void *old_app_cfg = ud_state->app_config;
+    ud_state->app_config = new_app_cfg;
+
+    if (old_app_cfg) {
         log_debug("Cleaning up configuration...");
 
         if (ud_cfg->config_cleanup) {
-            ud_cfg->config_cleanup(old_cfg);
+            ud_cfg->config_cleanup(old_app_cfg);
         } else {
             // best effort; hope we do not leave stuff behind...
             log_debug("No config_cleanup hook defined! Using default configuration cleanup!");
 
-            free(old_cfg);
+            free(old_app_cfg);
         }
     }
     return 0;
 }
 
 static int udaemon_read_config(ud_state_t *ud_state) {
-    ud_config_t *ud_cfg = ud_state->config;
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+
     if (ud_cfg->conf_file && ud_cfg->config_parser) {
-        if (ud_cfg->config) {
+        if (ud_state->app_config) {
             log_debug("Reloading configuration from %s", ud_cfg->conf_file);
         } else {
             log_debug("Loading configuration from %s", ud_cfg->conf_file);
         }
 
-        void *new_cfg = ud_cfg->config_parser(ud_cfg->conf_file, ud_cfg->config);
+        void *new_cfg = ud_cfg->config_parser(ud_cfg->conf_file, ud_state->app_config);
         if (!new_cfg) {
             // leave the existing configuration as-is...
             return 1;
@@ -103,9 +110,11 @@ static int udaemon_read_config(ud_state_t *ud_state) {
 }
 
 static int udaemon_cleanup(ud_state_t *ud_state) {
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+
     int retval;
-    if (ud_state->config->cleanup) {
-        retval = ud_state->config->cleanup(ud_state);
+    if (ud_cfg->cleanup) {
+        retval = ud_cfg->cleanup(ud_state);
         if (retval) {
             log_warning("Failed to perform cleanup!");
         }
@@ -143,13 +152,13 @@ static void os_signal_handler(int signo) {
     }
 }
 
-static void main_signal_handler(ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
+static void main_signal_handler(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
     bool *loop = context;
 
     ud_signal_t signal = read_signal_event(pollfd->fd);
 
     if (signal == SIG_HUP) {
-        udaemon_read_config(ud_state);
+        udaemon_read_config((ud_state_t *) ud_state);
     }
 
     udaemon_signal_handler(ud_state, signal);
@@ -180,7 +189,7 @@ const char *ud_version() {
     return UD_VERSION;
 }
 
-ud_state_t *ud_init(ud_config_t *config) {
+ud_state_t *ud_init(const ud_config_t *config) {
     ud_state_t *state = malloc(sizeof(ud_state_t));
     if (!state) {
         perror("malloc");
@@ -189,7 +198,7 @@ ud_state_t *ud_init(ud_config_t *config) {
     // Clear out the initial state...
     memset(state, 0, sizeof(ud_state_t));
 
-    state->config = config;
+    state->ud_config = config;
 
     for (int i = 0; i < FD_MAX; i++) {
         // ensure poll() doesn't do anything with these by default...
@@ -205,14 +214,19 @@ void ud_destroy(ud_state_t *ud_state) {
     }
 }
 
-void *ud_get_app_config(ud_state_t *ud_state) {
+inline const ud_config_t *ud_get_udaemon_config(const ud_state_t *ud_state) {
     if (ud_state) {
-        ud_config_t *ud_cfg = ud_state->config;
+        return ud_state->ud_config;
+    }
+    return NULL;
+}
+
+const void *ud_get_app_config(const ud_state_t *ud_state) {
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+    if (ud_state && ud_cfg && ud_cfg->conf_file) {
         // if we're configured *and* there's a config file set *then*
         // presume there's a valid application configuration present...
-        if (ud_cfg && ud_cfg->conf_file) {
-            return ud_cfg->config;
-        }
+        return ud_state->app_config;
     }
     return NULL;
 }
@@ -221,7 +235,7 @@ bool ud_valid_event_handler_id(eh_id_t event_handler_id) {
     return event_handler_id < FD_MAX;
 }
 
-int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
+int ud_add_event_handler(const ud_state_t *ud_state, int fd, short emask,
                          ud_event_handler_t callback, void *context, eh_id_t *event_handler_id) {
     if (ud_state == NULL || callback == NULL) {
         return -EINVAL;
@@ -241,11 +255,14 @@ int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
 
     log_debug("Adding event handler at idx: %d", idx);
 
-    ud_state->pollfds[idx].fd = fd;
-    ud_state->pollfds[idx].events = emask;
-    ud_state->pollfds[idx].revents = 0;
+    // cast away the const, the caller doesn't see this change...
+    ud_state_t *state = (ud_state_t *)ud_state;
 
-    ud_state->event_handlers[idx] = (ud_ehdef_t) {
+    state->pollfds[idx].fd = fd;
+    state->pollfds[idx].events = emask;
+    state->pollfds[idx].revents = 0;
+
+    state->event_handlers[idx] = (ud_ehdef_t) {
         .callback = callback,
         .context = context,
     };
@@ -257,7 +274,7 @@ int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
     return 0;
 }
 
-int ud_remove_event_handler(ud_state_t *ud_state, eh_id_t event_handler_id) {
+int ud_remove_event_handler(const ud_state_t *ud_state, eh_id_t event_handler_id) {
     if (ud_state == NULL || event_handler_id == 0) {
         return -EINVAL;
     }
@@ -269,17 +286,20 @@ int ud_remove_event_handler(ud_state_t *ud_state, eh_id_t event_handler_id) {
 
     log_debug("Removing event handler at idx: %d", idx);
 
-    ud_state->pollfds[idx].fd = -1;
-    ud_state->pollfds[idx].events = 0;
-    ud_state->pollfds[idx].revents = 0;
+    // cast away the const, the caller doesn't see this change...
+    ud_state_t *state = (ud_state_t *)ud_state;
 
-    ud_state->event_handlers[idx].callback = NULL;
-    ud_state->event_handlers[idx].context = NULL;
+    state->pollfds[idx].fd = -1;
+    state->pollfds[idx].events = 0;
+    state->pollfds[idx].revents = 0;
+
+    state->event_handlers[idx].callback = NULL;
+    state->event_handlers[idx].context = NULL;
 
     return 0;
 }
 
-int ud_schedule_task(ud_state_t *ud_state, uint16_t interval, ud_task_t task, void *context) {
+int ud_schedule_task(const ud_state_t *ud_state, uint16_t interval, ud_task_t task, void *context) {
     if (ud_state == NULL) {
         return -EINVAL;
     }
@@ -300,15 +320,20 @@ int ud_schedule_task(ud_state_t *ud_state, uint16_t interval, ud_task_t task, vo
 
     time_t next_deadline = time(NULL) + interval;
 
-    ud_state->task_queue[idx].task = task;
-    ud_state->task_queue[idx].interval = interval;
-    ud_state->task_queue[idx].next_deadline = next_deadline;
-    ud_state->task_queue[idx].context = context;
+    // cast away the const, the caller doesn't see this change...
+    ud_state_t *state = (ud_state_t *)ud_state;
+
+    state->task_queue[idx].task = task;
+    state->task_queue[idx].interval = interval;
+    state->task_queue[idx].next_deadline = next_deadline;
+    state->task_queue[idx].context = context;
 
     return 0;
 }
 
 int ud_main_loop(ud_state_t *ud_state) {
+    const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
+
     bool loop = true;
     int retval;
 
@@ -316,7 +341,7 @@ int ud_main_loop(ud_state_t *ud_state) {
     ud_closefrom(STDERR_FILENO);
 
     // do this *after* we've closed the file descriptors!
-    init_logging(ud_state->config->progname, ud_state->config->debug, ud_state->config->foreground);
+    init_logging(ud_cfg->progname, ud_cfg->debug, ud_cfg->foreground);
 
     /* catch all interesting signals */
     struct sigaction sigact;
@@ -346,17 +371,18 @@ int ud_main_loop(ud_state_t *ud_state) {
     // reserve this for our own events...
     ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, &loop, NULL);
 
-    if (!ud_state->config->foreground) {
-        log_debug("Using PID file '%s', uid %d, gid %d",
-                  ud_state->config->pid_file,
-                  ud_state->config->priv_user,
-                  ud_state->config->priv_group);
+    // read configuration right before we're dropping privileges...
+    retval = udaemon_read_config(ud_state);
+    if (retval) {
+        log_warning("Failed to read/parse configuration! Trying to continue with defaults...");
+    }
 
-        if (ud_state->config->pid_file) {
-            retval = daemonize(
-                         ud_state->config->pid_file,
-                         ud_state->config->priv_user,
-                         ud_state->config->priv_group);
+    if (!ud_cfg->foreground) {
+        log_debug("Using PID file '%s', uid %d, gid %d",
+                  ud_cfg->pid_file, ud_cfg->priv_user, ud_cfg->priv_group);
+
+        if (ud_cfg->pid_file) {
+            retval = daemonize(ud_cfg->pid_file, ud_cfg->priv_user, ud_cfg->priv_group);
 
             if (retval) {
                 log_warning("Daemonization failed!");
@@ -371,11 +397,6 @@ int ud_main_loop(ud_state_t *ud_state) {
         goto cleanup;
     }
 
-    retval = udaemon_read_config(ud_state);
-    if (retval) {
-        log_warning("Failed to read/parse configuration!");
-    }
-
     while (loop) {
         // Run all pending tasks first...
         run_tasks(ud_state, time(NULL));
@@ -388,8 +409,8 @@ int ud_main_loop(ud_state_t *ud_state) {
             }
         } else if (count == 0) {
             // Call back to the idle handler, if present...
-            if (ud_state->config->idle_handler) {
-                ud_state->config->idle_handler(ud_state);
+            if (ud_cfg->idle_handler) {
+                ud_cfg->idle_handler(ud_state);
             }
         } else {
             // There was something of interest; let's look a little closer...
@@ -407,9 +428,9 @@ int ud_main_loop(ud_state_t *ud_state) {
 cleanup:
     log_debug("Cleaning up...");
 
-    if (ud_state->config->pid_file) {
+    if (ud_cfg->pid_file) {
         // best effort; will only succeed if the permissions are set correctly...
-        unlink(ud_state->config->pid_file);
+        unlink(ud_cfg->pid_file);
     }
 
     if (udaemon_cleanup(ud_state)) {

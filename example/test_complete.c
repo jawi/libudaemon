@@ -51,10 +51,10 @@ static run_state_t _run_state = {
     .test_event_handler_id = 0,
 };
 
-static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *context);
-static int disconnect_server(ud_state_t *ud_state, void *context);
+static int reconnect_server(const ud_state_t *ud_state, const uint16_t interval, void *context);
+static int disconnect_server(const ud_state_t *ud_state, void *context);
 
-static void test_file_callback(ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
+static void test_file_callback(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
     run_state_t *run_state = context;
 
     if (pollfd->revents & (POLLHUP | POLLERR | POLLNVAL)) {
@@ -83,8 +83,8 @@ static void test_file_callback(ud_state_t *ud_state, struct pollfd *pollfd, void
     }
 }
 
-static int connect_server(ud_state_t *ud_state, void *context) {
-    test_config_t *cfg = ud_get_app_config(ud_state);
+static int connect_server(const ud_state_t *ud_state, void *context) {
+    const test_config_t *cfg = ud_get_app_config(ud_state);
     run_state_t *run_state = context;
 
     bzero(&run_state->test_server, sizeof(run_state->test_server));
@@ -114,7 +114,7 @@ static int connect_server(ud_state_t *ud_state, void *context) {
     return 0;
 }
 
-static int disconnect_server(ud_state_t *ud_state, void *context) {
+static int disconnect_server(const ud_state_t *ud_state, void *context) {
     run_state_t *run_state = context;
 
     int old_fd = run_state->test_server_fd;
@@ -136,7 +136,7 @@ static int disconnect_server(ud_state_t *ud_state, void *context) {
     return 0;
 }
 
-static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *context) {
+static int reconnect_server(const ud_state_t *ud_state, const uint16_t interval, void *context) {
     run_state_t *run_state = context;
 
     int rc;
@@ -167,22 +167,23 @@ static int reconnect_server(ud_state_t *ud_state, uint16_t interval, void *conte
     return interval ? interval << 1 : 1;
 }
 
-static void test_signal_handler(ud_state_t *ud_state, ud_signal_t signal) {
+static void test_signal_handler(const ud_state_t *ud_state, ud_signal_t signal) {
     if (signal == SIG_HUP) {
         // close and recreate socket connection...
-        reconnect_server(ud_state, 0, &_run_state);
+        ud_schedule_task(ud_state, 0, reconnect_server, &_run_state);
     } else {
         log_debug("Got signal: %d", signal);
     }
 }
 
-static int test_initialize(ud_state_t *ud_state) {
+static int test_initialize(const ud_state_t *ud_state) {
     log_debug("Initializing test, running against udaemon %s...", ud_version());
+    log_debug("Application configuration is %s", ud_get_app_config(ud_state) ? "present" : "NOT present");
 
     return ud_schedule_task(ud_state, 0, reconnect_server, &_run_state);
 }
 
-static int test_cleanup(ud_state_t *ud_state) {
+static int test_cleanup(const ud_state_t *ud_state) {
     log_debug("Cleaning up test...");
 
     disconnect_server(ud_state, &_run_state);
@@ -190,7 +191,7 @@ static int test_cleanup(ud_state_t *ud_state) {
     return 0;
 }
 
-static void *test_config_parser(const char *conf_file, void *config) {
+static void *test_config_parser(const char *conf_file, const void *config) {
     log_debug("Parsing test configuration...");
 
     test_config_t *cfg = malloc(sizeof(test_config_t));

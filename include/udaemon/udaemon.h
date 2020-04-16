@@ -48,33 +48,81 @@ typedef struct ud_config {
     char *pid_file;
     /** the path to the configuration file. */
     char *conf_file;
-    /** the actual configuration. */
-    void *config;
 
     // Hooks and callbacks...
 
-    /** called during initialization of udaemon. */
-    int (*initialize)(ud_state_t *ud_state);
-    /** called for each OS signal that is received. */
-    void (*signal_handler)(ud_state_t *ud_state, ud_signal_t);
-    /** called when no data or event is received. */
-    void (*idle_handler)(ud_state_t *ud_state);
-    /** called during cleanup of udaemon. */
-    int (*cleanup)(ud_state_t *ud_state);
-    /** called for parsing the configuration. */
-    void*(*config_parser)(const char *conf_file, void *config);
-    /** called when the configuration needs to be freed. */
+    /**
+     * Callback method called during right before the mainloop of udaemon
+     * starts. This method can be used to setup tasks that need to be run as
+     * part of the mainloop of udaemon.
+     *
+     * @param ud_state the current state of udaemon, cannot be NULL.
+     * @return 0 upon success, or any non-zero value in case of errors.
+     */
+    int (*initialize)(const ud_state_t *ud_state);
+    /**
+     * Callback method called for each OS signal that is received.
+     *
+     * @param ud_state the current state of udaemon, cannot be NULL;
+     * @param signal the OS signal that is received.
+     */
+    void (*signal_handler)(const ud_state_t *ud_state, const ud_signal_t signal);
+    /**
+     * Callback method called when no data or event is received during the
+     * mainloop of udaemon. This method should perform as little work as
+     * possible to avoid the mainloop from missing events.
+     *
+     * @param ud_state the current state of udaemon, cannot be NULL.
+     */
+    void (*idle_handler)(const ud_state_t *ud_state);
+    /**
+     * Callback method called when the cleanup of udaemon is performed. Is
+     * called automatically when the mainloop of udaemon terminates.
+     *
+     * @param ud_state the current state of udaemon, cannot be NULL.
+     * @return 0 upon success, or any non-zero value in case of errors.
+     */
+    int (*cleanup)(const ud_state_t *ud_state);
+    /**
+     * Callback method called for parsing the application-specific
+     * configuration. Is called automatically at the start of the mainloop of
+     * udaemon before daemonizing the application and dropping privileges.
+     *
+     * In case parsing fails for whatever reason, NULL can be returned. In case
+     * the configuration is reloaded (SIGHUP), this condition will cause to old
+     * configuration *not* to be replaced.
+     *
+     * @param conf_file the configuration file to parse, cannot be NULL;
+     * @param cur_config the current configuration (if present), can be NULL.
+     * @return the parsed application configuration, or NULL in case of errors.
+     */
+    void*(*config_parser)(const char *conf_file, const void *cur_config);
+    /**
+     * Callback method called when the application-specific configuration needs
+     * to be freed. Called automatically when the configuration is reloaded, or
+     * when the mainloop of udaemon terminates.
+     *
+     * @param config the application configuration to free.
+     */
     void (*config_cleanup)(void *config);
 } ud_config_t;
 
 /**
  * Callback event handler for polled event handling.
+ * 
+ * Event handlers are called automatically when a poll()-event is retrieved. In
+ * all cases, the implementation must take care of error handling. Note that in
+ * case of POLLIN, the number of bytes that can be read can be 0 in case of an
+ * EOF condition. Be aware that in such cases the event handler can/will be 
+ * called multiple times if the file descriptor is not closed or otherwise 
+ * ignored from reading. A solution for this is to clear the POLLIN bit from
+ * pollfd->event.
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param pollfd the polling information, such as file descriptor, cannot be NULL;
  * @param context the context registered with the event handler, can be NULL.
  */
-typedef void (*ud_event_handler_t)(ud_state_t *ud_state, struct pollfd *pollfd, void *context);
+typedef void (*ud_event_handler_t)(const ud_state_t *ud_state, struct pollfd *pollfd, void *context);
 
 /**
  * Represents a short-lived task.
@@ -86,7 +134,7 @@ typedef void (*ud_event_handler_t)(ud_state_t *ud_state, struct pollfd *pollfd, 
  *         terminated abnormally or a positive value to reschedule the task
  *         after N seconds.
  */
-typedef int (*ud_task_t)(ud_state_t *ud_state, uint16_t interval, void *context);
+typedef int (*ud_task_t)(const ud_state_t *ud_state, const uint16_t interval, void *context);
 
 /**
  * Denotes an identifier of event handlers.
@@ -111,7 +159,7 @@ const char *ud_version(void);
  * @param config the udaemon configuration to use.
  * @return a new udaemon state value, or NULL in case of out of memory.
  */
-ud_state_t *ud_init(ud_config_t *config);
+ud_state_t *ud_init(const ud_config_t *config);
 
 /**
  * Destroys a given udaemon state value.
@@ -124,12 +172,20 @@ ud_state_t *ud_init(ud_config_t *config);
 void ud_destroy(ud_state_t *ud_state);
 
 /**
+ * Provides access to the udaemon configuration.
+ *
+ * @param ud_state the udaemon state to use, cannot be NULL.
+ * @return the udaemon configuration, cannot be NULL.
+ */
+const ud_config_t *ud_get_udaemon_config(const ud_state_t *ud_state);
+
+/**
  * Provides access to the application configuration.
- * 
+ *
  * @param ud_state the udaemon state to use, cannot be NULL.
  * @return the application configuration, if defined, can be NULL.
  */
-void *ud_get_app_config(ud_state_t *ud_state);
+const void *ud_get_app_config(const ud_state_t *ud_state);
 
 /**
  * Tests whether or not a given event handler ID is valid.
@@ -139,7 +195,7 @@ void *ud_get_app_config(ud_state_t *ud_state);
  *
  * @param event_handler_id the event handler ID to test.
  */
-bool ud_valid_event_handler_id(eh_id_t event_handler_id);
+bool ud_valid_event_handler_id(const eh_id_t event_handler_id);
 
 /**
  * Adds a new event handler for polling (file-based) events.
@@ -152,8 +208,8 @@ bool ud_valid_event_handler_id(eh_id_t event_handler_id);
  * @param event_handler_id (optional) the event handler identifier that is
  * @return a non-zero value in case of errors, or zero in case of success.
  */
-int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
-                         ud_event_handler_t callback,
+int ud_add_event_handler(const ud_state_t *ud_state, const int fd, const short emask,
+                         const ud_event_handler_t callback,
                          void *context,
                          eh_id_t *event_handler_id);
 
@@ -164,7 +220,7 @@ int ud_add_event_handler(ud_state_t *ud_state, int fd, short emask,
  * @param event_handler_id the event handler identifier to remove.
  * @return zero in case of a successful removal, a non-zero value in case of errors.
  */
-int ud_remove_event_handler(ud_state_t *ud_state, eh_id_t event_handler_id);
+int ud_remove_event_handler(const ud_state_t *ud_state, const eh_id_t event_handler_id);
 
 /**
  * Schedules a given task to be executed after a given interval.
@@ -175,8 +231,8 @@ int ud_remove_event_handler(ud_state_t *ud_state, eh_id_t event_handler_id);
  * @param context the (optional) context to pass on to the task.
  * @return zero in case of success, a non-zero value in case of errors.
  */
-int ud_schedule_task(ud_state_t *ud_state, uint16_t interval,
-                     ud_task_t task, void *context);
+int ud_schedule_task(const ud_state_t *ud_state, const uint16_t interval,
+                     const ud_task_t task, void *context);
 
 /**
  * Runs the main loop of udaemon.
