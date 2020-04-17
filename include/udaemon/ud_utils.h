@@ -7,6 +7,8 @@
 #ifndef UD_UTILS_H_
 #define UD_UTILS_H_
 
+#include <pwd.h>
+
 typedef enum ud_daemon_result {
     err_none = 0,
 
@@ -34,6 +36,21 @@ typedef enum ud_daemon_result {
  *        Should be greater than zero.
  */
 void ud_closefrom(int lowfd);
+
+/**
+ * Parses a given username/group description into a `uid_t` and `gid_t`. If no
+ * valid description is given (NULL), this method yields the uid/gid for the
+ * user "nobody".
+ *
+ * NOTE: the format in which the given `entry` is expected is:
+ * `username`, `username:groupname`, `uid` or `uid:gid`.
+ *
+ * @param entry the username/group description to parse, may be NULL;
+ * @param uid the resulting `uid`;
+ * @param gid the resulting `gid`;
+ * @return 0 if successful, or non-zero in case of failure.
+ */
+int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid);
 
 /**
  * Daemonizes the current process into the background.

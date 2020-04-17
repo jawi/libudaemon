@@ -170,7 +170,9 @@ static void main_signal_handler(const ud_state_t *ud_state, struct pollfd *pollf
 
     if (signal == SIG_TERM) {
         log_debug("Terminating main event loop...");
-        ud_terminate(ud_state);
+        if (ud_terminate(ud_state)) {
+            log_warning("Failed to terminate main event loop!");
+        }
     }
 }
 
@@ -356,6 +358,8 @@ int ud_main_loop(ud_state_t *ud_state) {
     const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
 
     int retval;
+    // Indicate that we're currently running...
+    ud_state->running = true;
 
     // close any file descriptors we inherited...
     ud_closefrom(STDERR_FILENO);
@@ -388,9 +392,6 @@ int ud_main_loop(ud_state_t *ud_state) {
         perror("pipe");
         goto cleanup;
     }
-
-    // Indicate that we're currently running...
-    ud_state->running = true;
 
     // reserve this for our own events...
     ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, NULL, NULL);

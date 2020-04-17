@@ -15,6 +15,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <pwd.h>
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -23,6 +25,7 @@
 #include <arpa/inet.h>
 
 #include "udaemon/udaemon.h"
+#include "udaemon/ud_utils.h"
 
 #define PROGNAME "test"
 #define VERSION "1.0"
@@ -232,7 +235,7 @@ int main(int argc, char *argv[]) {
     // parse arguments...
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:dfhp:v")) != -1) {
+    while ((opt = getopt(argc, argv, "c:dfhp:u:v")) != -1) {
         switch (opt) {
         case 'c':
             daemon_config.conf_file = strdup(optarg);
@@ -246,6 +249,16 @@ int main(int argc, char *argv[]) {
         case 'p':
             daemon_config.pid_file = strdup(optarg);
             break;
+        case 'u': {
+            uid_t uid = { 0 };
+            gid_t gid = { 0 };
+            if (ud_parse_uid(optarg, &uid, &gid)) {
+                log_warning("Failed to parse %s as uid:gid!\n", optarg);
+            } else {
+                log_info("Requested to run as user: %d:%d...\n", uid, gid);
+            }
+            break;
+        }
         case 'v':
         case 'h':
         default:

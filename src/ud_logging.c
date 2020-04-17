@@ -12,7 +12,14 @@
 
 #include "udaemon/ud_logging.h"
 
-static bool show_debug_log = false;
+// see syslog.h; but these are not exposed, as such we copy them here...
+static const char *LEVEL_STR[] = { "EMERG", "ALERT", "CRIT", "ERROR", "WARN", "NOTICE", "INFO", "DEBUG" };
+
+static struct _log_config {
+    bool initialized;
+} log_config = {
+    .initialized = false,
+};
 
 /**
  * Initializes the logging layer.
@@ -24,8 +31,6 @@ static bool show_debug_log = false;
  *                   output log results only to the logging result.
  */
 void init_logging(const char *progname, bool debug, bool foreground) {
-    show_debug_log = debug;
-
     int facility = LOG_DAEMON;
     int options = LOG_CONS | LOG_PID | LOG_ODELAY;
     if (foreground) {
@@ -34,6 +39,14 @@ void init_logging(const char *progname, bool debug, bool foreground) {
     }
 
     openlog(progname, options, facility);
+
+    if (debug) {
+        setlogmask(LOG_UPTO(LOG_DEBUG));
+    } else {
+        setlogmask(LOG_UPTO(LOG_INFO));
+    }
+
+    log_config.initialized = true;
 }
 
 /**
@@ -47,7 +60,12 @@ void destroy_logging(void) {
     do { \
         va_list ap; \
         va_start(ap, msg); \
-        vsyslog(LEVEL, msg, ap); \
+        if (log_config.initialized) { \
+            vsyslog(LEVEL, msg, ap); \
+        } else { \
+            fprintf(stderr, "%s: ", LEVEL_STR[LEVEL]); \
+            vfprintf(stderr, msg, ap); \
+        } \
         va_end(ap); \
     } while (0)
 
@@ -59,9 +77,6 @@ void destroy_logging(void) {
  */
 __attribute__((__format__ (__printf__, 1, 0)))
 void log_debug(const char *msg, ...) {
-    if (!show_debug_log) {
-        return;
-    }
     DO_LOG(LOG_DEBUG);
 }
 

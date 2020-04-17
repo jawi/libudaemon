@@ -19,6 +19,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <pwd.h>
+#include <grp.h>
+
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -181,6 +184,67 @@ static int write_pidfile(const char *pidfile, uid_t uid, gid_t gid) {
     dprintf(fd, "%d\n", getpid());
 
     close(fd);
+
+    return 0;
+}
+
+int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
+    // NOTE: we cannot use log_* functions here as we're typically
+    // run *before* udaemon is initialized!!!
+    int64_t val;
+    struct passwd *pwd;
+    if (!entry || strlen(entry) == 0) {
+        pwd = getpwnam("nobody");
+        if (!pwd) {
+            fprintf(stderr, "Unable to find user 'nobody'!");
+            return 1;
+        }
+
+        *uid = pwd->pw_uid;
+        *gid = pwd->pw_gid;
+        return 0;
+    }
+
+    // create a copy where we can mutate stuff at will...
+    char *user = strdup(entry);
+    // determine whether we've got a group in our description...
+    char *group = strrchr(user, ':');
+    if (group) {
+        // usr now contains the user only :)
+        *group++ = '\0';
+    }
+
+    pwd = getpwnam(user);
+    if (!pwd) {
+        // try whether it is a numeric uid...
+        val = strtonum(user);
+        if (val >= 0) {
+            pwd = getpwuid((uint32_t) (val & UINT32_MAX));
+        }
+    }
+    if (!pwd) {
+        fprintf(stderr, "No such user: '%s'", user);
+        return 1;
+    }
+    *uid = pwd->pw_uid;
+    *gid = pwd->pw_gid;
+
+    if (group) {
+        struct group *grp = getgrnam(group);
+        if (!grp) {
+            val = strtonum(group);
+            if (val >= 0) {
+                grp = getgrgid((uint32_t) (val & UINT32_MAX));
+            }
+        }
+        if (!grp) {
+            fprintf(stderr, "No such group defined: '%s'", group);
+            return 1;
+        }
+        *gid = grp->gr_gid;
+    }
+    // clean up...
+    free(user);
 
     return 0;
 }
