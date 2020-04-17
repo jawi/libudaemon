@@ -36,6 +36,10 @@ target_compile_features(udaemon
     PRIVATE c_std_11
 )
 
+if(HAVE_FD_CLOEXEC)
+    target_compile_definitions(udaemon PRIVATE "HAVE_FD_CLOEXEC")
+endif()
+
 # Installation 
 
 include(GNUInstallDirs)
