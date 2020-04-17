@@ -189,8 +189,11 @@ static int write_pidfile(const char *pidfile, uid_t uid, gid_t gid) {
 }
 
 int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
-    int64_t val;
+    int64_t val = -1;
+    int retval = 0;
     struct passwd *pwd;
+    struct group *grp;
+
     if (!entry || strlen(entry) == 0) {
         pwd = getpwnam("nobody");
         if (!pwd) {
@@ -212,41 +215,47 @@ int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
         *group++ = '\0';
     }
 
-    pwd = getpwnam(user);
-    if (!pwd) {
-        // try whether it is a numeric uid...
-        val = strtonum(user);
-        if (val >= 0) {
-            pwd = getpwuid((uint32_t) (val & UINT32_MAX));
-        }
+    // try whether it is a numeric uid...
+    val = strtonum(user);
+    if (val >= 0) {
+        pwd = getpwuid((uid_t) (val & UINT32_MAX));
+    } else {
+        pwd = getpwnam(user);
     }
+
     if (!pwd) {
         log_warning("No such user: '%s'", user);
-        return 1;
+        retval = 1;
+        goto cleanup;
     }
+
     *uid = pwd->pw_uid;
     *gid = pwd->pw_gid;
 
     if (group) {
-        struct group *grp = getgrnam(group);
-        if (!grp) {
-            val = strtonum(group);
-            if (val >= 0) {
-                grp = getgrgid((uint32_t) (val & UINT32_MAX));
-            }
+        val = strtonum(group);
+        if (val >= 0) {
+            grp = getgrgid((gid_t) (val & UINT32_MAX));
+        } else {
+            grp = getgrnam(group);
         }
+
         if (!grp) {
             log_warning("No such group defined: '%s'", group);
-            return 1;
+            retval = 1;
+            goto cleanup;
         }
+
         *gid = grp->gr_gid;
     }
-    // clean up...
-    free(user);
 
     log_debug("Parsed %s as uid %d, gid %d...", entry, *uid, *gid);
 
-    return 0;
+cleanup:
+    // clean up...
+    free(user);
+
+    return retval;
 }
 
 #define SAFE_SIGNAL(rc) \
