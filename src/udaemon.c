@@ -354,6 +354,8 @@ int ud_schedule_task(const ud_state_t *ud_state, uint16_t interval, ud_task_t ta
     return 0;
 }
 
+extern void destroy_logging(void);
+
 int ud_main_loop(ud_state_t *ud_state) {
     const ud_config_t *ud_cfg = ud_get_udaemon_config(ud_state);
 
@@ -363,9 +365,6 @@ int ud_main_loop(ud_state_t *ud_state) {
 
     // close any file descriptors we inherited...
     ud_closefrom(STDERR_FILENO);
-
-    // do this *after* we've closed the file descriptors!
-    init_logging(ud_cfg->progname, ud_cfg->debug, ud_cfg->foreground);
 
     /* catch all interesting signals */
     struct sigaction sigact;
@@ -397,16 +396,17 @@ int ud_main_loop(ud_state_t *ud_state) {
     ud_add_event_handler(ud_state, event_pipe[0], POLLIN, main_signal_handler, NULL, NULL);
 
     if (!ud_cfg->foreground) {
-        log_debug("Using PID file '%s', uid %d, gid %d",
-                  ud_cfg->pid_file, ud_cfg->priv_user, ud_cfg->priv_group);
-
+        log_debug("Going drop privileges to uid %d, gid %d",
+                  ud_cfg->priv_user, ud_cfg->priv_group);
         if (ud_cfg->pid_file) {
-            retval = daemonize(ud_cfg->pid_file, ud_cfg->priv_user, ud_cfg->priv_group);
+            log_debug("Using PID file '%s'", ud_cfg->pid_file);
+        }
 
-            if (retval) {
-                log_warning("Daemonization failed!");
-                goto cleanup;
-            }
+        retval = daemonize(ud_cfg->pid_file, ud_cfg->priv_user, ud_cfg->priv_group);
+
+        if (retval) {
+            log_warning("Daemonization failed!");
+            goto cleanup;
         }
     }
 

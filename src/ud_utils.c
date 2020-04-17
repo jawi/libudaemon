@@ -67,7 +67,7 @@ static void ud_closefrom_proc(DIR *dirp, int lowfd, int maxfd) {
 
     while ((entry = readdir(dirp)) != NULL) {
         int64_t fd = strtonum(entry->d_name);
-        if ((fd == dirfd(dirp)) || (fd <= lowfd) || (fd > maxfd)) {
+        if ((fd == dirfd(dirp)) || (fd <= lowfd) || (fd >= maxfd)) {
             // don't close ourselves, or outside our defined boundaries...
             continue;
         }
@@ -105,15 +105,15 @@ void ud_closefrom(int lowfd) {
     const char *path = "/proc/self/fd";
 
     DIR *dirp = opendir(path);
-    if (dirp == NULL) {
-        log_debug("closing using fallback from %d..%d\n", lowfd, maxfd);
+    if (dirp) {
+        log_debug("Closing file descriptors using proc from %d..%d\n", lowfd, maxfd);
 
-        ud_closefrom_fallback(lowfd, (int) maxfd);
-    } else {
-        log_debug("closing using proc from %d..%d\n", lowfd, maxfd);
-
-        ud_closefrom_proc(dirp, lowfd, (int) maxfd);
+        ud_closefrom_proc(dirp, lowfd, maxfd);
         (void)closedir(dirp);
+    } else {
+        log_debug("Closing file descriptors using fallback from %d..%d\n", lowfd, maxfd);
+
+        ud_closefrom_fallback(lowfd, maxfd);
     }
 }
 
@@ -127,17 +127,17 @@ void ud_closefrom(int lowfd) {
 static int drop_privileges(uid_t uid, gid_t gid) {
     if (getuid() != 0) {
         // not running as root...
-        log_debug("not running as root, no need to drop privileges...");
+        log_debug("Not running as root, not going to drop privileges...");
         return 0;
     }
 
     if (setgid(gid) != 0) {
-        log_error("unable to drop group privileges: %m");
+        log_error("Unable to drop group privileges: %m");
         return -1;
     }
 
     if (setuid(uid) != 0) {
-        log_error("unable to drop user privileges: %m");
+        log_error("Unable to drop user privileges: %m");
         return -1;
     }
 
@@ -157,7 +157,7 @@ static int write_pidfile(const char *pidfile, uid_t uid, gid_t gid) {
 
     if (unlink(pidfile)) {
         if (is_root && (errno != ENOENT)) {
-            log_error("unable to remove pidfile: %m");
+            log_error("Unable to remove pidfile: %m");
         }
     }
 
@@ -165,11 +165,11 @@ static int write_pidfile(const char *pidfile, uid_t uid, gid_t gid) {
 
     if ((fd = open(pidfile, O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW, S_IWUSR|S_IRUSR|S_IRGRP|S_IROTH)) < 0) {
         if (is_root) {
-            log_error("unable to create pidfile: %m");
+            log_error("Unable to create pidfile: %m");
             return -1;
         } else {
             // no sense in continuing here, write will fail any way...
-            log_debug("not running as root, but unable to write PID file: %m");
+            log_debug("Not running as root, but unable to write PID file: %m");
             return 0;
         }
     }
@@ -177,7 +177,7 @@ static int write_pidfile(const char *pidfile, uid_t uid, gid_t gid) {
     // ensure the pid file has the correct permissions...
     if (is_root && uid != 0) {
         if (fchown(fd, uid, gid)) {
-            log_error("unable to change ownership of pidfile: %m");
+            log_error("Unable to change ownership of pidfile: %m");
         }
     }
 
@@ -189,14 +189,12 @@ static int write_pidfile(const char *pidfile, uid_t uid, gid_t gid) {
 }
 
 int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
-    // NOTE: we cannot use log_* functions here as we're typically
-    // run *before* udaemon is initialized!!!
     int64_t val;
     struct passwd *pwd;
     if (!entry || strlen(entry) == 0) {
         pwd = getpwnam("nobody");
         if (!pwd) {
-            fprintf(stderr, "Unable to find user 'nobody'!");
+            log_warning("Unable to find user 'nobody'!");
             return 1;
         }
 
@@ -223,7 +221,7 @@ int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
         }
     }
     if (!pwd) {
-        fprintf(stderr, "No such user: '%s'", user);
+        log_warning("No such user: '%s'", user);
         return 1;
     }
     *uid = pwd->pw_uid;
@@ -238,7 +236,7 @@ int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
             }
         }
         if (!grp) {
-            fprintf(stderr, "No such group defined: '%s'", group);
+            log_warning("No such group defined: '%s'", group);
             return 1;
         }
         *gid = grp->gr_gid;
@@ -246,13 +244,15 @@ int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid) {
     // clean up...
     free(user);
 
+    log_debug("Parsed %s as uid %d, gid %d...", entry, *uid, *gid);
+
     return 0;
 }
 
 #define SAFE_SIGNAL(rc) \
     int _rc = rc; \
     if (write(err_pipe[1], &_rc, 1) != 1) { \
-        log_warning("failed to write single byte to pipe!"); \
+        log_warning("Failed to write single byte to pipe!"); \
     } \
     close(err_pipe[1]);
 
@@ -271,13 +271,13 @@ int daemonize(const char *pid_file, uid_t uid, gid_t gid) {
     // create a anonymous pipe to communicate between daemon and our parent...
     int err_pipe[2] = { 0 };
     if (pipe(err_pipe) < 0) {
-        perror("pipe");
+        log_error("Failed to create pipe for daemon to parent communication!");
         return -err_pipe_create;
     }
 
     pid_t pid = fork();
     if (pid < 0) {
-        perror("fork");
+        log_error("Failed to fork from calling process!");
         return -err_fork;
     } else if (pid > 0) {
         // parent, wait until daemon is finished initializing...
@@ -304,6 +304,7 @@ int daemonize(const char *pid_file, uid_t uid, gid_t gid) {
         // fork again to ensure the daemon cannot take back the controlling tty...
         pid = fork();
         if (pid < 0) {
+            log_error("Failed to fork for as daemon!");
             SIGNAL_FAILURE(err_daemonize);
         } else if (pid > 0) {
             // terminate first child...
@@ -313,7 +314,7 @@ int daemonize(const char *pid_file, uid_t uid, gid_t gid) {
             int fd;
 
             if ((fd = open("/dev/null", O_RDWR)) < 0) {
-                log_error("unable to open /dev/null: %m");
+                log_error("Unable to open /dev/null: %m");
                 SIGNAL_FAILURE(err_dev_null);
             } else {
                 dup2(fd, STDIN_FILENO);
@@ -325,11 +326,11 @@ int daemonize(const char *pid_file, uid_t uid, gid_t gid) {
             umask(0);
 
             if (chdir("/") != 0) {
-                log_error("unable to change directory: %m");
+                log_error("Unable to change directory: %m");
                 SIGNAL_FAILURE(err_chdir);
             }
 
-            if (write_pidfile(pid_file, uid, gid)) {
+            if (pid_file && write_pidfile(pid_file, uid, gid)) {
                 SIGNAL_FAILURE(err_pid_file);
             }
 

@@ -4,6 +4,8 @@
  * Copyright: (C) 2020 jawi
  *   License: Apache License 2.0
  */
+#define _GNU_SOURCE
+#include <errno.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -12,103 +14,72 @@
 
 #include "udaemon/ud_logging.h"
 
-// see syslog.h; but these are not exposed, as such we copy them here...
-static const char *LEVEL_STR[] = { "EMERG", "ALERT", "CRIT", "ERROR", "WARN", "NOTICE", "INFO", "DEBUG" };
-
 static struct _log_config {
     bool initialized;
+    bool foreground;
 } log_config = {
     .initialized = false,
+    .foreground = true,
 };
 
-/**
- * Initializes the logging layer.
- *
- * @param progname the name of the program to include in the logging result;
- * @param debug true if debug logging is to be enabled, false to disable debug
- *              logging;
- * @param foreground true if logging should be outputted on stderr, false to
- *                   output log results only to the logging result.
- */
-void init_logging(const char *progname, bool debug, bool foreground) {
+void init_logging(void) {
+    if (log_config.initialized) {
+        // Already initialized; do not do this again...
+        return;
+    }
+
     int facility = LOG_DAEMON;
     int options = LOG_CONS | LOG_PID | LOG_ODELAY;
-    if (foreground) {
+    if (log_config.foreground) {
         facility = LOG_USER;
         options |= LOG_PERROR;
     }
 
-    openlog(progname, options, facility);
-
-    if (debug) {
-        setlogmask(LOG_UPTO(LOG_DEBUG));
-    } else {
-        setlogmask(LOG_UPTO(LOG_INFO));
-    }
+    openlog(program_invocation_short_name, options, facility);
 
     log_config.initialized = true;
 }
 
-/**
- * Closes the logging layer.
- */
 void destroy_logging(void) {
+    if (!log_config.initialized) {
+        // Not initialized; do nothing...
+        return;
+    }
+
     closelog();
+
+    log_config.initialized = false;
 }
 
-#define DO_LOG(LEVEL) \
-    do { \
-        va_list ap; \
-        va_start(ap, msg); \
-        if (log_config.initialized) { \
-            vsyslog(LEVEL, msg, ap); \
-        } else { \
-            fprintf(stderr, "%s: ", LEVEL_STR[LEVEL]); \
-            vfprintf(stderr, msg, ap); \
-        } \
-        va_end(ap); \
-    } while (0)
+void setup_logging(bool foreground) {
+    destroy_logging();
 
-/**
- * Logs a message on debug level.
- *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
- */
-__attribute__((__format__ (__printf__, 1, 0)))
-void log_debug(const char *msg, ...) {
-    DO_LOG(LOG_DEBUG);
+    log_config.foreground = foreground;
+
+    init_logging();
 }
 
-/**
- * Logs a message on info level.
- *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
- */
-__attribute__((__format__ (__printf__, 1, 0)))
-void log_info(const char *msg, ...) {
-    DO_LOG(LOG_INFO);
+void set_loglevel(loglevel_t loglevel) {
+    int mask;
+    if (loglevel == DEBUG) {
+        mask = LOG_UPTO(LOG_DEBUG);
+    } else if (loglevel == WARNING) {
+        mask = LOG_UPTO(LOG_WARNING);
+    } else if (loglevel == ERROR) {
+        mask = LOG_UPTO(LOG_ERR);
+    } else {
+        mask = LOG_UPTO(LOG_INFO);
+    }
+    setlogmask(mask);
 }
 
-/**
- * Logs a message on warning level.
- *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
- */
-__attribute__((__format__ (__printf__, 1, 0)))
-void log_warning(const char *msg, ...) {
-    DO_LOG(LOG_WARNING);
-}
+static int LEVEL[] = { LOG_DEBUG, LOG_INFO, LOG_WARNING, LOG_ERR };
 
-/**
- * Logs a message on error level.
- *
- * @param msg the log message;
- * @param args the arguments to include in the log message.
- */
-__attribute__((__format__ (__printf__, 1, 0)))
-void log_error(const char *msg, ...) {
-    DO_LOG(LOG_ERR);
+__attribute__((__format__ (__printf__, 2, 0)))
+void log_msg(const loglevel_t level, const char *msg, ...) {
+    va_list ap;
+    va_start(ap, msg);
+    init_logging();
+    vsyslog(LEVEL[level], msg, ap);
+    va_end(ap);
 }

@@ -34,16 +34,12 @@ typedef struct ud_state ud_state_t;
  * Represents the configuration of udaemon.
  */
 typedef struct ud_config {
-    /** true to enable "debug" logging, false to disable it. */
-    bool debug;
     /** true to stay in the foreground, false to daemonize the application. */
     bool foreground;
     /** the user ID the daemon is running as. */
     uid_t priv_user;
     /** the group ID the daemon is running as. */
     gid_t priv_group;
-    /** the program name to use for logging purposes. */
-    char *progname;
     /** the absolute path to the PID file to write when running as daemon. */
     char *pid_file;
     /** the absolute path to the configuration file. */

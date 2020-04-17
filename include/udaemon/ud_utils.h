@@ -62,7 +62,8 @@ int ud_parse_uid(const char *entry, uid_t *uid, gid_t *gid);
  * terminate *after* the daemonization process is complete. This function
  * returns as the running, daemonized, process.
  *
- * @param pid_file the PID file to write with the PID of the background process;
+ * @param pid_file the PID file to write with the PID of the background
+ *        process. Can be NULL in which case NO PID file will be written;
  * @param uid the owning user ID of the PID file;
  * @param gid the owning group ID of the PID file.
  * @return 0 if successful, or non-zero in case of failure.

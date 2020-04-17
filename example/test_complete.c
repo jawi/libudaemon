@@ -96,6 +96,7 @@ static int connect_server(const ud_state_t *ud_state, void *context) {
 
     if (connect(sockfd, (struct sockaddr *)&run_state->test_server, sizeof(run_state->test_server))) {
         log_error("Unable to connect to server!");
+        close(sockfd); // avoid leaking FDs!
         return 1;
     }
 
@@ -169,6 +170,18 @@ static void test_signal_handler(const ud_state_t *ud_state, ud_signal_t signal) 
 
         // close and recreate socket connection...
         ud_schedule_task(ud_state, 0, reconnect_server, run_state);
+    } else if (signal == SIG_USR1) {
+        log_info("Turning off debug logging...");
+
+        set_loglevel(INFO);
+
+        log_debug("No longer logging at debug level...");
+    } else if (signal == SIG_USR2) {
+        log_info("Turning on debug logging...");
+
+        set_loglevel(DEBUG);
+
+        log_debug("Now logging at debug level...");
     } else {
         log_debug("Got signal: %d", signal);
     }
@@ -221,7 +234,6 @@ int main(int argc, char *argv[]) {
     };
 
     ud_config_t daemon_config = {
-        .progname = PROGNAME,
         .pid_file = NULL,
         .conf_file = NULL,
         .initialize = test_initialize,
@@ -234,6 +246,8 @@ int main(int argc, char *argv[]) {
 
     // parse arguments...
     int opt;
+    bool debug = false;
+    char *uid_gid = NULL;
 
     while ((opt = getopt(argc, argv, "c:dfhp:u:v")) != -1) {
         switch (opt) {
@@ -241,7 +255,7 @@ int main(int argc, char *argv[]) {
             daemon_config.conf_file = strdup(optarg);
             break;
         case 'd':
-            daemon_config.debug = true;
+            debug = true;
             break;
         case 'f':
             daemon_config.foreground = true;
@@ -249,16 +263,9 @@ int main(int argc, char *argv[]) {
         case 'p':
             daemon_config.pid_file = strdup(optarg);
             break;
-        case 'u': {
-            uid_t uid = { 0 };
-            gid_t gid = { 0 };
-            if (ud_parse_uid(optarg, &uid, &gid)) {
-                log_warning("Failed to parse %s as uid:gid!\n", optarg);
-            } else {
-                log_info("Requested to run as user: %d:%d...\n", uid, gid);
-            }
+        case 'u':
+            uid_gid = strdup(optarg);
             break;
-        }
         case 'v':
         case 'h':
         default:
@@ -270,6 +277,22 @@ int main(int argc, char *argv[]) {
             exit(1);
         }
     }
+
+    // setup logging for our application...
+    setup_logging(daemon_config.foreground);
+    set_loglevel(debug ? DEBUG : INFO);
+
+    if (uid_gid) {
+        uid_t uid = { 0 };
+        gid_t gid = { 0 };
+        if (ud_parse_uid(uid_gid, &uid, &gid)) {
+            log_warning("Failed to parse %s as uid:gid!\n", uid_gid);
+        } else {
+            log_info("Requested to run as user: %d:%d...\n", uid, gid);
+        }
+        free(uid_gid);
+    }
+
     // Use sane defaults...
     if (daemon_config.conf_file == NULL) {
         daemon_config.conf_file = strdup(CONF_FILE);
