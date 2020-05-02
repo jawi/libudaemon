@@ -26,6 +26,14 @@ typedef enum ud_signal {
 } ud_signal_t;
 
 /**
+ * Represents the result of a event handler.
+ */
+typedef enum ud_result {
+    RES_OK = 0,
+    RES_ERROR = 1,
+} ud_result_t;
+
+/**
  * Represents the (private) state of udaemon.
  */
 typedef struct ud_state ud_state_t;
@@ -111,14 +119,17 @@ typedef struct ud_config {
  * case of POLLIN, the number of bytes that can be read can be 0 in case of an
  * EOF condition. Be aware that in such cases the event handler can/will be
  * called multiple times if the file descriptor is not closed or otherwise
- * ignored from reading. A solution for this is to clear the POLLIN bit from
- * pollfd->event.
+ * ignored from reading. A solution for this is to return RES_ERROR from the
+ * event handler after scheduling a task for reconnecting.
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param pollfd the polling information, such as file descriptor, cannot be NULL;
  * @param context the context registered with the event handler, can be NULL.
+ * @return RES_OK upon ok, or RES_ERROR upon errors. In case of RES_ERROR,
+ *         udaemon will close the file-descriptor effectively removing this
+ *         event handler from being polled/called.
  */
-typedef void (*ud_event_handler_t)(const ud_state_t *ud_state, struct pollfd *pollfd, void *context);
+typedef ud_result_t (*ud_event_handler_t)(const ud_state_t *ud_state, struct pollfd *pollfd, void *context);
 
 /**
  * Represents a short-lived task.
@@ -228,9 +239,12 @@ bool ud_valid_event_handler_id(const eh_id_t event_handler_id);
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param fd the file descriptor to poll;
  * @param emask the event mask to poll for;
- * @param callback the event callback to call once an event is available;
+ * @param callback the event callback (see #ud_event_handler_t) to call once an
+ *                 event is available;
  * @param context the (optional) context to pass to the event handler callback;
- * @param event_handler_id (optional) the event handler identifier that is
+ * @param event_handler_id (optional) the event handler identifier that is set
+ *                         when the registration succeeded. Should be used to
+ *                         unregister event handlers.
  * @return a non-zero value in case of errors, or zero in case of success.
  */
 int ud_add_event_handler(const ud_state_t *ud_state, const int fd, const short emask,
@@ -257,7 +271,7 @@ int ud_remove_event_handler(const ud_state_t *ud_state, const eh_id_t event_hand
  *
  * @param ud_state the udaemon state to use, cannot be NULL;
  * @param interval the interval in seconds to schedule the task in;
- * @param task the task to schedule;
+ * @param task the task (see #ud_task_t) to schedule;
  * @param context the (optional) context to pass on to the task.
  * @return zero in case of success, a non-zero value in case of errors.
  */

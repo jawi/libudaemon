@@ -157,7 +157,7 @@ static void os_signal_handler(int signo) {
     }
 }
 
-static void main_signal_handler(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
+static ud_result_t main_signal_handler(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
     (void)context;
 
     ud_signal_t signal = read_signal_event(pollfd->fd);
@@ -174,6 +174,8 @@ static void main_signal_handler(const ud_state_t *ud_state, struct pollfd *pollf
             log_warning("Failed to terminate main event loop!");
         }
     }
+
+    return RES_OK;
 }
 
 static void run_tasks(ud_state_t *ud_state, time_t now) {
@@ -183,8 +185,12 @@ static void run_tasks(ud_state_t *ud_state, time_t now) {
         if (taskdef->task && taskdef->next_deadline < now) {
             int retval = taskdef->task(ud_state, taskdef->interval, taskdef->context);
             if (retval <= 0) {
+                log_debug("Removing task at index %d", i);
+
                 taskdef->task = NULL;
             } else {
+                log_debug("Rescheduling task at index %d to run in %d seconds", i, retval);
+
                 taskdef->interval = (uint16_t) retval;
                 taskdef->next_deadline = now + retval;
             }
@@ -303,9 +309,6 @@ int ud_remove_event_handler(const ud_state_t *ud_state, eh_id_t event_handler_id
     }
 
     int idx = (int) event_handler_id;
-    if (ud_state->pollfds[idx].fd < 0) {
-        return -EINVAL;
-    }
 
     log_debug("Removing event handler at idx: %d", idx);
 
@@ -443,8 +446,18 @@ int ud_main_loop(ud_state_t *ud_state) {
                 if (ud_state->pollfds[i].revents) {
                     // something of interest happened...
                     ud_event_handler_t callback = ud_state->event_handlers[i].callback;
+
                     void *context = ud_state->event_handlers[i].context;
-                    callback(ud_state, &ud_state->pollfds[i], context);
+
+                    ud_result_t res = callback(ud_state, &ud_state->pollfds[i], context);
+                    if (res == RES_ERROR) {
+                        log_debug("Callback for fd#%d returned an error! Closing it...", ud_state->pollfds[i].fd);
+
+                        close(ud_state->pollfds[i].fd);
+
+                        // setting the fd to -1 is sufficient to ignore it in the next poll cycle...
+                        ud_state->pollfds[i].fd = -1;
+                    }
                 }
             }
         }

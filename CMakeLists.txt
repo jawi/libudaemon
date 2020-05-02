@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.5)
 
 project(
     libudaemon
-    VERSION 0.9
+    VERSION 0.10
     LANGUAGES C
 )
 

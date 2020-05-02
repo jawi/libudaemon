@@ -8,6 +8,6 @@
 #define UD_VERSION_H_
 
 #define UD_NAME "libudaemon"
-#define UD_VERSION "0.9"
+#define UD_VERSION "0.10"
 
 #endif

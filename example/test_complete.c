@@ -50,7 +50,7 @@ typedef struct {
 static int reconnect_server(const ud_state_t *ud_state, const uint16_t interval, void *context);
 static int disconnect_server(const ud_state_t *ud_state, void *context);
 
-static void test_file_callback(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
+static ud_result_t test_file_callback(const ud_state_t *ud_state, struct pollfd *pollfd, void *context) {
     run_state_t *run_state = context;
 
     if (pollfd->revents & (POLLHUP | POLLERR | POLLNVAL)) {
@@ -63,20 +63,18 @@ static void test_file_callback(const ud_state_t *ud_state, struct pollfd *pollfd
         int cnt = read(pollfd->fd, &buf, sizeof(buf));
         if (cnt > 0) {
             log_info("Read %d bytes from server!", cnt);
+
+            return RES_OK;
         } else if (cnt == 0) {
             log_info("Socket closed by server (EOF)...");
-
-            // Signal that we no longer want to read anything; otherwise
-            // we are called many times more after this call with the same
-            // signal. This task will terminate when `reconnect_server` is
-            // called, so it does not make us lose anything...
-            pollfd->events = pollfd->events & ~POLLIN;
 
             ud_schedule_task(ud_state, 0, reconnect_server, context);
         } else {
             log_warning("Error obtained while reading from server?!");
         }
     }
+
+    return RES_ERROR;
 }
 
 static int connect_server(const ud_state_t *ud_state, void *context) {
